@@ -36,7 +36,7 @@ double Round(double x, int p)
 }
 
 
-
+#pragma region backup
 
 /// <summary>
 /// Loads the xyz and mdl file to the global variable _points; the scan of the Lorry
@@ -84,9 +84,6 @@ int LoadFile(string fileName, boost::shared_ptr<pcl::PointCloud<PointT> > return
 	return return_cloud->width * return_cloud->height;
 }
 
-
-
-
 void SaveMatrix(string file, MatrixXd mat)
 {
 	ofstream ofile(file);
@@ -100,9 +97,6 @@ void SaveMatrix(string file, MatrixXd mat)
 	}
 	ofile.close();
 }
-
-
-
 
 Matrix4d GetTransformationMatrixFromFile(std::string fileName)
 {
@@ -132,9 +126,6 @@ Matrix4d GetTransformationMatrixFromFile(std::string fileName)
 	return matrix;
 }
 
-
-
-
 void GetOXYPointsFromFile(string fileName, PointTypeLocal &O, PointTypeLocal &X, PointTypeLocal &Y)
 {
 	std::ifstream f(fileName);
@@ -150,8 +141,6 @@ void GetOXYPointsFromFile(string fileName, PointTypeLocal &O, PointTypeLocal &X,
 	f.close();
 }
 
-
-
 void ShowPointCloud(PointCloudPtr cloud, string name = "")
 {
 	mainViewer->addPointCloud<PointT>(cloud, name);
@@ -159,7 +148,6 @@ void ShowPointCloud(PointCloudPtr cloud, string name = "")
 	mainViewer->removeAllPointClouds();
 	mainViewer->spinOnce();
 }
-
 
 void GetClustersByRegionGrowing(boost::shared_ptr<pcl::PointCloud<PointTypeLocal> > cloudScene, size_t minSize, vector<pcl::PointCloud<PointTypeLocal>::Ptr> &clusterClouds)
 {
@@ -191,9 +179,6 @@ void GetClustersByRegionGrowing(boost::shared_ptr<pcl::PointCloud<PointTypeLocal
 	}
 }
 
-
-
-
 std::pair<PointTypeLocal, PointTypeLocal> BestLineFromPoints(const vector <PointTypeLocal> &points)
 {
 	std::vector<Eigen::Vector3f> c(points.size());
@@ -220,9 +205,6 @@ std::pair<PointTypeLocal, PointTypeLocal> BestLineFromPoints(const vector <Point
 	return std::make_pair(ori, axi);
 }
 
-
-
-
 PointTypeLocal GetIntersection(PointTypeLocal p1, PointTypeLocal v1, PointTypeLocal p2, PointTypeLocal v2)
 {
 	/// x1 + a1t1 = x2 + a2t2
@@ -242,29 +224,7 @@ PointTypeLocal GetIntersection(PointTypeLocal p1, PointTypeLocal v1, PointTypeLo
 	return intersection;
 }
 
-
-
-
-void InitialiseViewer()
-{
-	std::pair<unsigned int, unsigned int> viewerWindowPosition;
-	std::pair<unsigned int, unsigned int> viewerWindowSize;
-	viewerWindowSize = std::make_pair<unsigned int, unsigned int>(800, 650);
-	viewerWindowPosition = std::make_pair<unsigned int, unsigned int>(500, 25);
-
-	mainViewer->setPosition(viewerWindowPosition.first, viewerWindowPosition.second);
-	mainViewer->setSize(viewerWindowSize.first, viewerWindowSize.second);
-
-	pcl::PointCloud<PointTypeLocal>::Ptr cloud(new pcl::PointCloud<PointTypeLocal>);
-	cloud->points.push_back(PointTypeLocal(0, 0, 0));
-	mainViewer->addPointCloud(cloud);
-	mainViewer->spinOnce();
-}
-
-
-
-
-void Something(string filePrefix, int numberOfPoses)
+void Jacobian(string filePrefix, int numberOfPoses)
 {
 	MatrixXd mat(numberOfPoses, 3);
 	for (size_t i = 0; i < numberOfPoses; i++)
@@ -285,6 +245,25 @@ void Something(string filePrefix, int numberOfPoses)
 }
 
 
+void InitialiseViewer()
+{
+	std::pair<unsigned int, unsigned int> viewerWindowPosition;
+	std::pair<unsigned int, unsigned int> viewerWindowSize;
+	viewerWindowSize = std::make_pair<unsigned int, unsigned int>(800, 650);
+	viewerWindowPosition = std::make_pair<unsigned int, unsigned int>(500, 25);
+
+	mainViewer->setPosition(viewerWindowPosition.first, viewerWindowPosition.second);
+	mainViewer->setSize(viewerWindowSize.first, viewerWindowSize.second);
+
+	pcl::PointCloud<PointTypeLocal>::Ptr cloud(new pcl::PointCloud<PointTypeLocal>);
+	cloud->points.push_back(PointTypeLocal(0, 0, 0));
+	mainViewer->addPointCloud(cloud);
+	mainViewer->spinOnce();
+}
+
+#pragma endregion 
+
+
 inline Vector3f PointT_To_Vector3f(PointT point)
 {
 	return Vector3f(point.x, point.y, point.z);
@@ -298,8 +277,36 @@ inline PointT Vector3f_To_PointT(Vector3f p)
 }
 
 
+struct Plane
+{
+	Vector3f point;
+	Vector3f normal;
+	Plane(Vector3f p, Vector3f n) : point(p), normal(n)
+	{
 
-Vector4f FitPlane(Vector3f p1, Vector3f p2, Vector3f p3)
+	}
+};
+struct Cube
+{
+	PointCloudPtr cloud;
+	vector<Plane> cubeFaces;
+};
+struct Emitter
+{
+	Vector3f position;
+	Vector3f normalVectorFromEmitter;
+	float vFOV;
+	float hFOV;
+	int vResolution;
+	int hResolution;
+	vector<vector <Vector3f>> rays;
+
+};
+
+float resolutionForCube = 1; ///1 mm
+
+
+Plane FitPlane(Vector3f p1, Vector3f p2, Vector3f p3)
 {
 	float a1 = p2.x() - p1.x();
 	float b1 = p2.y() - p1.y();
@@ -313,25 +320,29 @@ Vector4f FitPlane(Vector3f p1, Vector3f p2, Vector3f p3)
 	float c = a1 * b2 - b1 * a2;
 	float d = (-a * p1.x() - b * p1.y() - c * p1.z());
 
-	return	Vector4f(a, b, c, d);
+	return	Plane(Vector3f(p1.x(), p1.y(), p1.z()), Vector3f(a, b, c));
+}
+
+Vector3f GetIntersectionPointVectorAndPlane(Vector3f rayVector, Vector3f rayPoint, Vector3f planeNormal, Vector3f planePoint) 
+{
+	Vector3f diff = rayPoint - planePoint;
+	double prod1 = diff.dot(planeNormal);
+	double prod2 = rayVector.dot(planeNormal);
+	double prod3 = prod1 / prod2;
+	return rayPoint - rayVector * prod3;
+}
+
+inline bool IsPointOnPlane(Vector3f point, Vector3f planeNormal, Vector3f planePoint, float epsilon = 1E-10)
+{
+	return ((planePoint - point).dot(planeNormal) < epsilon);
 }
 
 
-struct Cube
+inline int ToVecIndex(int i, int j, int maxCol)
 {
-	PointCloudPtr cloud;
-	vector<Vector4f> cubeFaces;
-};
-struct Emitter
-{
-	PointT position;
-	Vector3f normalVectorFromEmitter;
-	float vFOV;
-	float hFOV;
-	int vResolution;
-	int hResolution;
-	vector<Vector3f> rays;
-};
+	return i * maxCol + j;
+}
+
 
 
 ///A Cube actually has same dimensions in all sides but question is confusing and might be referring cuboid
@@ -374,11 +385,11 @@ void CreateCube(float length, float width, float height, Matrix4f toWorld, Cube 
 	{
 		cube.cloud->points.clear();
 		PointT temp(255, 255, 255);
-		for (size_t i = 0; i < length; i++)
+		for (size_t i = 0; i < length; i+= resolutionForCube)
 		{
-			for (size_t j = 0; j < width; j++)
+			for (size_t j = 0; j < width; j += resolutionForCube)
 			{
-				for (size_t k = 0; k < height; k++)
+				for (size_t k = 0; k < height; k += resolutionForCube)
 				{
 					temp.x = i; temp.y = j; temp.z = k;
 					cube.cloud->points.push_back(temp);
@@ -506,17 +517,17 @@ void CreateEmitter(float verticalFOV, float horizontalFOV, int verticalResolutio
 
 	///Fill rays and emitter pose
 	{
-		emitter.position = cloud->points[0];
+		emitter.position = Vector3f(cloud->points[0].x, cloud->points[0].y, cloud->points[0].z);
 		Vector3f o = PointT_To_Vector3f(cloud->points[0]);
 		cloud->points.erase(cloud->points.begin());
 
 		emitter.normalVectorFromEmitter = toWorld.block(0,0,3,3) * Vector3f(0, 0, 1);
 
-		emitter.rays.resize(cloud->points.size());
+		emitter.rays = vector<vector <Vector3f>>(emitter.hResolution, vector<Vector3f>(emitter.vResolution));
 		for (size_t i = 0; i < cloud->points.size(); i++)
 		{
-			emitter.rays[i] = PointT_To_Vector3f(cloud->points[i]) - o;
-			emitter.rays[i].normalize();
+			emitter.rays[i/ emitter.hResolution][i%emitter.hResolution] = PointT_To_Vector3f(cloud->points[i]) - o;
+			emitter.rays[i / emitter.hResolution][i%emitter.hResolution].normalize();
 		}
 	}
 
@@ -524,10 +535,76 @@ void CreateEmitter(float verticalFOV, float horizontalFOV, int verticalResolutio
 }
 
 
-
-void IlluminateWCSFromEmitter(Emitter &emitter, float maxDistance= 100)
+vector<int> GetRayIntersectionsOnCube(Vector3f rayVector, Vector3f rayPoint, Cube &cube, float maxDistance=1000)
 {
+	float minTraverseIncrement = resolutionForCube * 10;
+	vector<Vector3f> intersectionOnFaces;
 
+	
+	pcl::search::KdTree<PointT> kdtree;
+	kdtree.setInputCloud(cube.cloud);
+	std::vector<int> pointIdxNKNSearch;
+	std::vector<float> pointNKNSquaredDistance;
+	float distance = 0;
+
+	PointT searchPoint;
+	searchPoint.x = rayPoint.x() + rayVector.x() * distance;
+	searchPoint.y = rayPoint.y() + rayVector.y() * distance;
+	searchPoint.z = rayPoint.z() + rayVector.z() * distance;
+
+	kdtree.nearestKSearch(searchPoint, 1, pointIdxNKNSearch, pointNKNSquaredDistance);
+	distance = sqrt(pointNKNSquaredDistance[0]);
+
+	///Just a thought of saving cost:
+	///instead of reducing increment to 1mm (need lower if point cloud resolution is lower) and repeat kdtree search many times,
+	///search in bigger area and then find the intersection of plane and update neighbours of the intersecting point.
+
+	do
+	{
+		searchPoint.x = rayPoint.x() + rayVector.x() * distance;
+		searchPoint.y = rayPoint.y() + rayVector.y() * distance;
+		searchPoint.z = rayPoint.z() + rayVector.z() * distance;
+		kdtree.radiusSearch(searchPoint, minTraverseIncrement/2, pointIdxNKNSearch, pointNKNSquaredDistance);
+		distance += minTraverseIncrement;
+
+	} while ((pointIdxNKNSearch.size() == 0) && distance < maxDistance);
+
+	if (pointIdxNKNSearch.size() > 0)
+	{
+		Vector3f vec(cube.cloud->points[pointIdxNKNSearch[0]].x, cube.cloud->points[pointIdxNKNSearch[0]].y, cube.cloud->points[pointIdxNKNSearch[0]].z);
+		Plane face = *(find_if(cube.cubeFaces.begin(), cube.cubeFaces.end(), [vec](Plane& p) { return IsPointOnPlane(vec, p.normal, p.point); }));
+		Vector3f point = GetIntersectionPointVectorAndPlane(rayVector, rayPoint, face.normal, face.point);
+
+		kdtree.radiusSearch(Vector3f_To_PointT(point), resolutionForCube, pointIdxNKNSearch, pointNKNSquaredDistance);
+
+		///Beam Ray affects all these points
+		return pointIdxNKNSearch;
+	}
+	else
+	{
+		return vector<int>();
+	}
+}
+
+
+void IlluminateWCSFromEmitter(Emitter &emitter, Cube &cube, float maxDistance= 100)
+{
+	PointCloudPtr world(new PointCloudT);
+	*world = *cube.cloud;
+	vector<int> indices;
+	for (size_t i = 0; i < emitter.hResolution; i++)
+	{
+		for (size_t j = 0; j < emitter.vResolution; j++)
+		{
+			indices = GetRayIntersectionsOnCube(emitter.rays[i][j], emitter.position, cube);
+
+			for (size_t j = 0; j < indices.size(); j++)
+			{
+				world->points[indices[j]].g = 0;
+				world->points[indices[j]].b = 0;
+			}
+		}
+	}
 }
 
 
