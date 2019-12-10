@@ -7,11 +7,11 @@
 
 
 #define PointTypeLocal pcl::PointXYZRGB
-
+#define INRANGE(x, x1, x2) (x >= x1 && x <= x2)
 
 using namespace std;
 using namespace Eigen;
-
+using namespace cv;
 
 
 
@@ -141,14 +141,6 @@ void GetOXYPointsFromFile(string fileName, PointTypeLocal &O, PointTypeLocal &X,
 	f.close();
 }
 
-void ShowPointCloud(PointCloudPtr cloud, string name = "")
-{
-	mainViewer->addPointCloud<PointT>(cloud, name);
-	mainViewer->spin();
-	mainViewer->removeAllPointClouds();
-	mainViewer->spinOnce();
-}
-
 void GetClustersByRegionGrowing(boost::shared_ptr<pcl::PointCloud<PointTypeLocal> > cloudScene, size_t minSize, vector<pcl::PointCloud<PointTypeLocal>::Ptr> &clusterClouds)
 {
 	clusterClouds.clear();
@@ -264,6 +256,35 @@ void InitialiseViewer()
 #pragma endregion 
 
 
+
+
+void ShowPointCloud(PointCloudPtr cloud, string name = "")
+{
+	mainViewer->addPointCloud<PointT>(cloud, name);
+	mainViewer->spin();
+	mainViewer->removeAllPointClouds();
+	mainViewer->spinOnce();
+}
+
+void AddPointCloud(PointCloudPtr cloud, string name = "")
+{
+	mainViewer->addPointCloud<PointT>(cloud, name);
+	mainViewer->spin();
+}
+
+inline void AddCube(PointT center, string name = "", float length = 1, int r = 255, int g = 255, int b = 255)
+{
+	mainViewer->addCube((center.x - length / 2), (center.x + length / 2), (center.y - length / 2), (center.y + length / 2), (center.z - length / 2), (center.z + length / 2), (double)r, (double)g, (double)b, name);
+	//mainViewer->spin();
+	//mainViewer->removeAllShapes();
+}
+
+void ClearViewer()
+{
+	mainViewer->removeAllPointClouds();
+	mainViewer->spinOnce();
+}
+
 inline Vector3f PointT_To_Vector3f(PointT point)
 {
 	return Vector3f(point.x, point.y, point.z);
@@ -271,11 +292,15 @@ inline Vector3f PointT_To_Vector3f(PointT point)
 
 inline PointT Vector3f_To_PointT(Vector3f p)
 {
-	PointT point(255,255,255);
+	PointT point(255, 255, 255);
 	point.x = p[0]; point.y = p[1]; point.z = p[2];
 	return point;
 }
 
+inline float ToRadian(float degree)
+{
+	return degree * M_PI / 180;
+}
 
 struct Plane
 {
@@ -284,6 +309,9 @@ struct Plane
 	Plane(Vector3f p, Vector3f n) : point(p), normal(n)
 	{
 
+	}
+	Plane()
+	{
 	}
 };
 struct Cube
@@ -300,30 +328,31 @@ struct Emitter
 	int vResolution;
 	int hResolution;
 	vector<vector <Vector3f>> rays;
+	PointCloudPtr screen;
 
 };
 
-float resolutionForCube = 1; ///1 mm
+const float resolutionForCube = 1; ///1 mm
 
 
 Plane FitPlane(Vector3f p1, Vector3f p2, Vector3f p3)
 {
-	float a1 = p2.x() - p1.x();
-	float b1 = p2.y() - p1.y();
-	float c1 = p2.z() - p2.z();
-	float a2 = p3.x() - p1.x();
-	float b2 = p3.y() - p1.y();
-	float c2 = p3.z() - p1.z();
+	Vector3f normal = (p1 - p2).cross(p3 - p2);
+	normal.normalize();
+	//float d = (-a * p1.x() - b * p1.y() - c * p1.z());
+	Vector3f center((p1.x() + p2.x() + p3.x()) / 3, (p1.y() + p2.y() + p3.y()) / 3, (p1.z() + p2.z() + p3.z()) / 3);
 
-	float a = b1 * c2 - b2 * c1;
-	float b = a2 * c1 - a1 * c2;
-	float c = a1 * b2 - b1 * a2;
-	float d = (-a * p1.x() - b * p1.y() - c * p1.z());
-
-	return	Plane(Vector3f(p1.x(), p1.y(), p1.z()), Vector3f(a, b, c));
+	return	Plane(center, normal);
 }
 
-Vector3f GetIntersectionPointVectorAndPlane(Vector3f rayVector, Vector3f rayPoint, Vector3f planeNormal, Vector3f planePoint) 
+Vector3f GetIntersectionPointVectorAndPlane(Vector3f rayD, Vector3f rayP, Vector3f planeN, Vector3f planeP)
+{
+	float d = planeP.dot(-planeN);
+	float t = -(d + rayP.z() * planeN.z() + rayP.y() * planeN.y() + rayP.x() * planeN.x()) / (rayD.z() * planeN.z() + rayD.y() * planeN.y() + rayD.x() * planeN.x());
+	return rayP + t * rayD;
+}
+
+Vector3f GetIntersectionPointVectorAndPlane1(Vector3f rayVector, Vector3f rayPoint, Vector3f planeNormal, Vector3f planePoint)
 {
 	Vector3f diff = rayPoint - planePoint;
 	double prod1 = diff.dot(planeNormal);
@@ -334,9 +363,21 @@ Vector3f GetIntersectionPointVectorAndPlane(Vector3f rayVector, Vector3f rayPoin
 
 inline bool IsPointOnPlane(Vector3f point, Vector3f planeNormal, Vector3f planePoint, float epsilon = 1E-10)
 {
-	return ((planePoint - point).dot(planeNormal) < epsilon);
+	//float asd =(planePoint - point).dot(planeNormal);
+	float d = (planeNormal.x()*planePoint.x() + planeNormal.y()*planePoint.y() + planeNormal.z()*planePoint.z());
+	float ax_by_cz = -(planeNormal.x()*point.x() + planeNormal.y()*point.y() + planeNormal.z()*point.z());
+	return (abs(ax_by_cz + d) < epsilon);
 }
 
+inline float DistanceToPlane(Vector3f point, Vector3f planeNormal, Vector3f planePoint)
+{
+	float d = -(planeNormal.x()*planePoint.x() + planeNormal.y()*planePoint.y() + planeNormal.z()*planePoint.z());
+	float distance = (fabs((planeNormal.x() * point.x() + planeNormal.y() * point.y() +
+		planeNormal.z() * point.z() + d)))
+		/ sqrt(planeNormal.x() * planeNormal.x() + planeNormal.y() *
+			planeNormal.y() + planeNormal.z() * planeNormal.z());
+	return distance;
+}
 
 inline int ToVecIndex(int i, int j, int maxCol)
 {
@@ -385,14 +426,17 @@ void CreateCube(float length, float width, float height, Matrix4f toWorld, Cube 
 	{
 		cube.cloud->points.clear();
 		PointT temp(255, 255, 255);
-		for (size_t i = 0; i < length; i+= resolutionForCube)
+		for (size_t i = 0; i < length; i += resolutionForCube)
 		{
 			for (size_t j = 0; j < width; j += resolutionForCube)
 			{
 				for (size_t k = 0; k < height; k += resolutionForCube)
 				{
-					temp.x = i; temp.y = j; temp.z = k;
-					cube.cloud->points.push_back(temp);
+					//if ((i==0 || i == length-1) || (j == 0 || j == width - 1) || (k == 0 || k == height - 1)) ///For only faces
+					{
+						temp.x = i; temp.y = j; temp.z = k;
+						cube.cloud->points.push_back(temp);
+					}
 				}
 			}
 		}
@@ -404,7 +448,13 @@ void CreateCube(float length, float width, float height, Matrix4f toWorld, Cube 
 
 	pcl::transformPointCloud(*cube.cloud, *cube.cloud, toWorld);
 
-	ShowPointCloud(cube.cloud);
+	//for (Plane& plane : cube.cubeFaces)
+	//{
+	//	plane.normal = toWorld.block(0, 0, 3, 3) * plane.normal;
+	//	plane.point = toWorld * Vector4f(plane.point.x(), plane.point.y(), plane.point.z(), 1);
+	//}
+
+	//ShowPointCloud(cube.cloud);
 }
 
 
@@ -415,7 +465,7 @@ void CreateEmitter(float verticalFOV, float horizontalFOV, int verticalResolutio
 	emitter.hResolution = horizontalResolution;
 	emitter.vResolution = verticalResolution;
 
-	PointCloudPtr cloud(new PointCloudT);
+	emitter.screen = PointCloudPtr(new PointCloudT);
 
 
 	/////Create a projected ray board towards z-axis
@@ -444,53 +494,56 @@ void CreateEmitter(float verticalFOV, float horizontalFOV, int verticalResolutio
 	//}
 
 
-	vector<Vector3f> vectorsFOV;///at distance 1000: if resolution comes too high, rays will be too close and may be distorted because of rounding off issue from system.
-	///Find FOV vectors: top left, top right, bottom left, bottom right
+	vector<Vector3f> vectorsFOV;///FOV vectors: top left, top right, bottom left, bottom right
+
+	///at distance "factor": if resolution comes too high, rays will be too close and may be distorted because of rounding off issue from system.
 	{
 		Vector3f tempVector(0, 0, 1);
 		AngleAxisf aa;
+		int factor = 20;
+
 
 		///top left
-		aa = AngleAxisf(emitter.vFOV / 2,Vector3f(1, 0, 0));
+		aa = AngleAxisf(ToRadian(-emitter.vFOV / 2), Vector3f(1, 0, 0));
 		tempVector = aa.toRotationMatrix() * tempVector;
 
-		aa = AngleAxisf(emitter.hFOV / 2, Vector3f(0, 1, 0));	
+		aa = AngleAxisf(ToRadian(-emitter.hFOV / 2), Vector3f(0, 1, 0));
 		tempVector = aa.toRotationMatrix() * tempVector;
 
-		vectorsFOV.push_back(tempVector * 1000);
+		vectorsFOV.push_back(tempVector * factor);
 
 		///top right
 		tempVector = Vector3f(0, 0, 1);
 
-		aa = AngleAxisf(emitter.vFOV / 2, Vector3f(1, 0, 0));
+		aa = AngleAxisf(ToRadian(-emitter.vFOV / 2), Vector3f(1, 0, 0));
 		tempVector = aa.toRotationMatrix() * tempVector;
 
-		aa = AngleAxisf(-emitter.hFOV / 2, Vector3f(0, 1, 0));
+		aa = AngleAxisf(ToRadian(emitter.hFOV / 2), Vector3f(0, 1, 0));
 		tempVector = aa.toRotationMatrix() * tempVector;
 
-		vectorsFOV.push_back(tempVector * 1000);
+		vectorsFOV.push_back(tempVector * factor);
 
 		///bottom left
 		tempVector = Vector3f(0, 0, 1);
 
-		aa = AngleAxisf(-emitter.vFOV / 2, Vector3f(1, 0, 0));
+		aa = AngleAxisf(ToRadian(emitter.vFOV / 2), Vector3f(1, 0, 0));
 		tempVector = aa.toRotationMatrix() * tempVector;
 
-		aa = AngleAxisf(emitter.hFOV / 2, Vector3f(0, 1, 0));
+		aa = AngleAxisf(ToRadian(-emitter.hFOV / 2), Vector3f(0, 1, 0));
 		tempVector = aa.toRotationMatrix() * tempVector;
 
-		vectorsFOV.push_back(tempVector * 1000);
+		vectorsFOV.push_back(tempVector * factor);
 
 		///bottom right
 		tempVector = Vector3f(0, 0, 1);
 
-		aa = AngleAxisf(-emitter.vFOV / 2, Vector3f(1, 0, 0));
+		aa = AngleAxisf(ToRadian(emitter.vFOV / 2), Vector3f(1, 0, 0));
 		tempVector = aa.toRotationMatrix() * tempVector;
 
-		aa = AngleAxisf(-emitter.hFOV / 2, Vector3f(0, 1, 0));
+		aa = AngleAxisf(ToRadian(emitter.hFOV / 2), Vector3f(0, 1, 0));
 		tempVector = aa.toRotationMatrix() * tempVector;
 
-		vectorsFOV.push_back(tempVector * 1000);
+		vectorsFOV.push_back(tempVector * factor);
 	}
 
 
@@ -498,36 +551,38 @@ void CreateEmitter(float verticalFOV, float horizontalFOV, int verticalResolutio
 	{
 		float horizontalIncrement = abs((vectorsFOV[0].x()) - (vectorsFOV[1].x())) / emitter.hResolution;
 		float verticalIncrement = abs((vectorsFOV[0].y()) - (vectorsFOV[2].y())) / emitter.vResolution;
-		PointT temp(255, 255, 255);
-		cloud->points.push_back(temp);///Emitter itself
-		for (float i = (vectorsFOV[0].x()); i < (vectorsFOV[1].x()); i += horizontalIncrement)
+		PointT temp(255, 0, 0);
+		temp.x = 0; temp.y = 0; temp.z = 0;
+		emitter.screen->points.push_back(temp);///Emitter itself
+
+		for (float j = vectorsFOV[2].y(); j < (vectorsFOV[1].y() - verticalIncrement * 0.5); j += verticalIncrement)
 		{
-			for (float j = vectorsFOV[0].y(); j < vectorsFOV[2].y(); j += verticalIncrement)
+			for (float i = (vectorsFOV[2].x()); i < (vectorsFOV[1].x() - horizontalIncrement * 0.5); i += horizontalIncrement)
 			{
 				temp.x = i; temp.y = j, temp.z = vectorsFOV[0].z();
-				cloud->points.push_back(temp);
+				emitter.screen->points.push_back(temp);
 			}
 		}
 
-		cloud->width = cloud->points.size();
-		cloud->height = 1;
+		emitter.screen->width = emitter.screen->points.size();
+		emitter.screen->height = 1;
 	}
-	
-	pcl::transformPointCloud(*cloud, *cloud, toWorld);
+
+	pcl::transformPointCloud(*emitter.screen, *emitter.screen, toWorld);
 
 	///Fill rays and emitter pose
 	{
-		emitter.position = Vector3f(cloud->points[0].x, cloud->points[0].y, cloud->points[0].z);
-		Vector3f o = PointT_To_Vector3f(cloud->points[0]);
-		cloud->points.erase(cloud->points.begin());
+		emitter.position = Vector3f(emitter.screen->points[0].x, emitter.screen->points[0].y, emitter.screen->points[0].z);
+		Vector3f o = PointT_To_Vector3f(emitter.screen->points[0]);
+		emitter.screen->points.erase(emitter.screen->points.begin());
 
-		emitter.normalVectorFromEmitter = toWorld.block(0,0,3,3) * Vector3f(0, 0, 1);
+		emitter.normalVectorFromEmitter = toWorld.block(0, 0, 3, 3) * Vector3f(0, 0, 1);
 
-		emitter.rays = vector<vector <Vector3f>>(emitter.hResolution, vector<Vector3f>(emitter.vResolution));
-		for (size_t i = 0; i < cloud->points.size(); i++)
+		emitter.rays = vector<vector <Vector3f>>(emitter.vResolution, vector<Vector3f>(emitter.hResolution));
+		for (size_t i = 0; i < emitter.screen->points.size(); i++)
 		{
-			emitter.rays[i/ emitter.hResolution][i%emitter.hResolution] = PointT_To_Vector3f(cloud->points[i]) - o;
-			emitter.rays[i / emitter.hResolution][i%emitter.hResolution].normalize();
+			emitter.rays[i / emitter.hResolution][i % emitter.hResolution] = PointT_To_Vector3f(emitter.screen->points[i]) - o;
+			emitter.rays[i / emitter.hResolution][i % emitter.hResolution].normalize();
 		}
 	}
 
@@ -535,12 +590,12 @@ void CreateEmitter(float verticalFOV, float horizontalFOV, int verticalResolutio
 }
 
 
-vector<int> GetRayIntersectionsOnCube(Vector3f rayVector, Vector3f rayPoint, Cube &cube, float maxDistance=1000)
+vector<int> GetRaySplashOnCube(Vector3f rayVector, Vector3f rayPoint, Cube &cube, float splashArea = resolutionForCube * 0.55, float maxDistance = 1000)
 {
-	float minTraverseIncrement = resolutionForCube * 10;
+	float minTraverseIncrement = resolutionForCube * 2;
 	vector<Vector3f> intersectionOnFaces;
 
-	
+
 	pcl::search::KdTree<PointT> kdtree;
 	kdtree.setInputCloud(cube.cloud);
 	std::vector<int> pointIdxNKNSearch;
@@ -564,21 +619,105 @@ vector<int> GetRayIntersectionsOnCube(Vector3f rayVector, Vector3f rayPoint, Cub
 		searchPoint.x = rayPoint.x() + rayVector.x() * distance;
 		searchPoint.y = rayPoint.y() + rayVector.y() * distance;
 		searchPoint.z = rayPoint.z() + rayVector.z() * distance;
-		kdtree.radiusSearch(searchPoint, minTraverseIncrement/2, pointIdxNKNSearch, pointNKNSquaredDistance);
+
+		/// Test the ray tracing and the searched neighbours
+		{
+			//if (distance == 120)
+			//{
+			//	cout << "here" << endl;
+			//	//searchPoint.x = 0; searchPoint.y = 0; searchPoint.z = 100;
+			//	kdtree.radiusSearch(searchPoint, minTraverseIncrement / 2, pointIdxNKNSearch, pointNKNSquaredDistance);
+			//	PointCloudPtr cloud(new PointCloudT);
+			//	for (size_t i = 0; i < pointIdxNKNSearch.size(); i++)
+			//	{
+			//		cloud->points.push_back(cube.cloud->points[pointIdxNKNSearch[i]]);
+			//	}
+			//	cloud->width = cloud->points.size();
+			//	cloud->height = 1;
+			//	PointT temp3; temp3.x = 0; temp3.y = 0; temp3.z = 0;
+			//	mainViewer->removeAllPointClouds();
+			//	mainViewer->addLine(temp3, searchPoint, 255, 0, 0, "line1");
+			//	mainViewer->addCoordinateSystem(100);
+			//	ShowPointCloud(cloud);
+			//	ShowPointCloud(cube.cloud);
+			//	mainViewer->removeAllShapes();
+			//}
+		}
+
+
+		kdtree.radiusSearch(searchPoint, minTraverseIncrement, pointIdxNKNSearch, pointNKNSquaredDistance);
 		distance += minTraverseIncrement;
 
 	} while ((pointIdxNKNSearch.size() == 0) && distance < maxDistance);
 
 	if (pointIdxNKNSearch.size() > 0)
 	{
-		Vector3f vec(cube.cloud->points[pointIdxNKNSearch[0]].x, cube.cloud->points[pointIdxNKNSearch[0]].y, cube.cloud->points[pointIdxNKNSearch[0]].z);
-		Plane face = *(find_if(cube.cubeFaces.begin(), cube.cubeFaces.end(), [vec](Plane& p) { return IsPointOnPlane(vec, p.normal, p.point); }));
+		/// Test the ray tracing and the searched neighbours
+		{
+			//cout << "here" << endl;
+			////searchPoint.x = 0; searchPoint.y = 0; searchPoint.z = 100;
+			//kdtree.radiusSearch(searchPoint, minTraverseIncrement / 2, pointIdxNKNSearch, pointNKNSquaredDistance);
+			//PointCloudPtr cloud(new PointCloudT);
+			//for (size_t i = 0; i < pointIdxNKNSearch.size(); i++)
+			//{
+			//	cloud->points.push_back(cube.cloud->points[pointIdxNKNSearch[i]]);
+			//}
+			//cloud->width = cloud->points.size();
+			//cloud->height = 1;
+			//PointT temp3; temp3.x = 0; temp3.y = 0; temp3.z = 0;
+			//mainViewer->removeAllPointClouds();
+			//mainViewer->addLine(temp3, searchPoint, 255, 0, 0, "line1");
+			//mainViewer->addCoordinateSystem(100);
+			//ShowPointCloud(cloud);
+			//ShowPointCloud(cube.cloud);
+			//mainViewer->removeAllShapes();
+		}
+
+		Plane face;
+		///Find closest plane;
+		{
+			vector<float> distanceToPlanes;
+			Vector3f vec(cube.cloud->points[pointIdxNKNSearch[0]].x, cube.cloud->points[pointIdxNKNSearch[0]].y, cube.cloud->points[pointIdxNKNSearch[0]].z);
+			for_each(cube.cubeFaces.begin(), cube.cubeFaces.end(), [vec, &distanceToPlanes](Plane& p) { return distanceToPlanes.push_back(DistanceToPlane(vec, p.normal, p.point)); });
+			face = cube.cubeFaces[min_element(distanceToPlanes.begin(), distanceToPlanes.end()) - distanceToPlanes.begin()];
+		}
+
+
 		Vector3f point = GetIntersectionPointVectorAndPlane(rayVector, rayPoint, face.normal, face.point);
 
-		kdtree.radiusSearch(Vector3f_To_PointT(point), resolutionForCube, pointIdxNKNSearch, pointNKNSquaredDistance);
+		///Test the intersection point and the plane selected
+		{
+			//PointT temp1, temp2, temp3, temp4, temp5;
+			//temp1.x = face.point.x(); temp1.y = face.point.y(); temp1.z = face.point.z();
+			//temp2.x = point.x(); temp2.y = point.y(); temp2.z = point.z();
+			//temp4.x = rayPoint.x() + 100 * rayVector.x(); temp4.y = rayPoint.y() + 100 * rayVector.y(); temp4.z = rayPoint.z() + 100 * rayVector.z();
+			//temp3.x = 0; temp3.y = 0; temp3.z = 0;
+			//temp5 = cube.cloud->points[pointIdxNKNSearch[0]];
+			//mainViewer->addLine(temp3, temp4, 255, 0, 0, "line1");
+			//mainViewer->addLine(temp3, temp5, 0, 255, 0, "line2");
+			//mainViewer->addLine(temp3, temp1, 0, 0, 255, "line3");
+			//mainViewer->addLine(temp3, temp2, 255, 0, 255, "line4");
+			////mainViewer->addSphere(temp2, 10, 0, 0, 255);
+			//mainViewer->addCoordinateSystem(30);
+			//AddPointCloud(cube.cloud);
+			//mainViewer->removeAllShapes();
+			//mainViewer->spinOnce();
+			//ClearViewer();
+		}
 
-		///Beam Ray affects all these points
-		return pointIdxNKNSearch;
+
+		if (point != Vector3f(0, 0, 0))
+		{
+			pointIdxNKNSearch.clear();
+			PointT p = Vector3f_To_PointT(point);
+			kdtree.radiusSearch(p, splashArea, pointIdxNKNSearch, pointNKNSquaredDistance);
+			return pointIdxNKNSearch;
+		}
+		else
+		{
+			return vector<int>();
+		}
+
 	}
 	else
 	{
@@ -587,24 +726,125 @@ vector<int> GetRayIntersectionsOnCube(Vector3f rayVector, Vector3f rayPoint, Cub
 }
 
 
-void IlluminateWCSFromEmitter(Emitter &emitter, Cube &cube, float maxDistance= 100)
+void IlluminateWCSFromEmitter(Emitter &emitter, Cube &cube, PointCloudPtr world, float maxDistance = 100, vector<size_t> colsToIlluminate = vector<size_t>())
 {
-	PointCloudPtr world(new PointCloudT);
-	*world = *cube.cloud;
-	vector<int> indices;
-	for (size_t i = 0; i < emitter.hResolution; i++)
-	{
-		for (size_t j = 0; j < emitter.vResolution; j++)
-		{
-			indices = GetRayIntersectionsOnCube(emitter.rays[i][j], emitter.position, cube);
+	//PointCloudPtr world(new PointCloudT);
+	//*world = *cube.cloud;
+	world->points.clear();
+	world->points.reserve(emitter.vResolution*emitter.hResolution / 2);
+	pcl::search::KdTree<PointT> kdtree;
+	kdtree.setInputCloud(cube.cloud);
 
-			for (size_t j = 0; j < indices.size(); j++)
+	if (colsToIlluminate.size())
+	{
+
+		for (size_t i : colsToIlluminate)
+		{
+			for (size_t j = 0; j < emitter.vResolution; j++)
 			{
-				world->points[indices[j]].g = 0;
-				world->points[indices[j]].b = 0;
+				vector<int> affectedPoints = GetRaySplashOnCube(emitter.rays[j][i], emitter.position, cube);
+
+				for (int index : affectedPoints)
+				{
+					PointT p = cube.cloud->points[index]; p.r = 255; p.g = 0; p.b = 0;
+					world->points.push_back(p);
+				}
 			}
 		}
 	}
+	else
+	{
+		for (size_t i = 0; i < emitter.hResolution; i++)
+		{
+			for (size_t j = 0; j < emitter.vResolution; j += 1)
+			{
+
+				vector<int> affectedPoints = GetRaySplashOnCube(emitter.rays[j][i], emitter.position, cube);
+
+				for (int index : affectedPoints)
+				{
+					PointT p = cube.cloud->points[index]; p.r = 255; p.g = 0; p.b = 0;
+					world->points.push_back(p);
+				}
+
+				//for (size_t k = 0; k < indices.size(); k++)
+				//{
+				//	world->points.push_back(cube.cloud->points[indices[k]]);
+				//}
+			}
+		}
+	}
+	world->width = world->points.size();
+	world->height = 1;
+}
+
+
+
+cv::Mat ToImage(PointCloudPtr cloud, uint zPlane = 300, uint imgWidth = 1920, uint imgHeight = 1080)
+{
+	cv::Mat image(imgHeight, imgWidth, CV_8UC3, cv::Scalar(0, 0, 0));
+
+	PointCloudT::Ptr imgCloud(new PointCloudT);///tgt
+
+	imgCloud->resize(cloud->size());
+	vector<float> Pp(3, 0), Pn(3, 0);
+	Pp[2] = zPlane; Pn[2] = 1;
+	vector<float> Rp(3, 0), Rv(3);
+
+	//cloud1->points[0].x = 150;
+	//cloud1->points[0].y = 200;
+	//cloud1->points[0].z = 400;
+
+
+	for (size_t i = 0; i < cloud->size(); i++)
+	{
+		Rp[0] = cloud->points[i].x;
+		Rp[1] = cloud->points[i].y;
+		Rp[2] = cloud->points[i].z;
+
+		float mag = sqrt(pow(Rp[0], 2) + pow(Rp[1], 2) + pow(Rp[2], 2));
+
+		Rv[0] = Rp[0] / mag;
+		Rv[1] = Rp[1] / mag;
+		Rv[2] = Rp[2] / mag;
+
+		///http://www.ambrsoft.com/TrigoCalc/Plan3D/PlaneLineIntersection_.htm
+		float t = (Pp[2]) / Rv[2];
+
+		imgCloud->points[i].x = Rv[0] * t;
+		imgCloud->points[i].y = Rv[1] * t;
+		imgCloud->points[i].z = Rv[2] * t;
+		imgCloud->points[i].r = cloud->points[i].r;
+		imgCloud->points[i].g = cloud->points[i].g;
+		imgCloud->points[i].b = cloud->points[i].b;
+	}
+
+	ShowPointCloud(imgCloud, "sdfcsdf");
+
+	//SaveXYZPointCloud("imgCloud.xyz", cloud2->points);
+
+
+	int cWidth = 100 * imgWidth/imgHeight, cHeight = 100;
+
+	int minX = -cWidth / 2, maxX = cWidth / 2;
+	int minY = -cHeight / 2, maxY = cHeight / 2;
+
+
+	for_each(imgCloud->points.begin(), imgCloud->points.end(), [minX, minY, cWidth, cHeight, imgWidth, imgHeight](PointT &point)
+	{
+		point.x = imgWidth -  (int)((((float)(point.x - minX)) / (float)cWidth) * imgWidth);
+		point.y = imgHeight - (int)((((float)(point.y - minY)) / (float)cHeight) * imgHeight);
+	});
+
+
+	for (size_t i = 0; i < imgCloud->size(); i++)
+	{
+		if (INRANGE(imgCloud->points[i].x, 0, imgWidth - 1) && INRANGE(imgCloud->points[i].y, 0, imgHeight - 1))
+		{
+			image.at<Vec3b>(Point( imgCloud->points[i].x, imgCloud->points[i].y)) = Vec3b(imgCloud->points[i].b, imgCloud->points[i].g, imgCloud->points[i].r);
+		}
+	}
+	return image;
 }
 
 
@@ -612,18 +852,89 @@ void IlluminateWCSFromEmitter(Emitter &emitter, Cube &cube, float maxDistance= 1
 int main(int argc, char* argv[])
 {
 	InitialiseViewer();
-	
+
+	PointT temp, temp1;
+	temp.x = 10; temp.y = 0; temp.z = 0;
+	temp1.x = 0; temp1.y = 0; temp1.z = 0;
+
+	//////red:x, green:y blue:z
+	//mainViewer->addLine(temp1, temp, 255, 255, 0, "line1");
+	////mainViewer->addSphere(temp, 5, 255, 255, 255, "asd");
+	//AddCube(temp, "cd", 2);
+	//mainViewer->addCoordinateSystem(5);
+	//mainViewer->spin();
+	//mainViewer->removeAllShapes();
+	//return 0;
+
+	//Vector3f point(4, 0, 0), planeN(1,0,0), planeP(1,0,0);
+	//cout << DistanceToPlane(point,planeN, planeP);
+	//return 0;
+
+
+	Matrix4f trans = Matrix4f::Identity();
+	trans(0, 3) = -10;
+	trans(1, 3) = -10;
+	trans(2, 3) = 50;
+
 	Cube cube;
-	CreateCube(100, 100, 100, Matrix4f::Identity(), cube);
+	CreateCube(20, 20, 20, trans, cube);
+	cout << "Cube Created" << endl;
+
 
 	Emitter emitter;
-	//CreateEmitter(60, 70, 64, 48, Matrix4f::Identity(), emitter);
+	CreateEmitter(24, 32, 48, 64, Matrix4f::Identity(), emitter);
+	cout << "Emitter Created" << endl;
 
 
+	PointCloudPtr world(new PointCloudT);
+	int colFreq = 5;
+	///Get illuminated points in world from the rays in the given column frequency: colFreq=1 every col, colFreq=2 every 2nd col
+	{
+		vector<size_t> colsToIlluminate(ceil((float)emitter.hResolution / colFreq));
+		for (size_t i = 0, j = 0; i < ceil((float)emitter.hResolution / colFreq); i++, j += colFreq) { colsToIlluminate[i] = j; }
+		for (size_t i = 0; i < emitter.screen->points.size(); i++)
+		{
+			if ((i%emitter.hResolution) % colFreq)
+			{
+				emitter.screen->points[i].r = 255;
+				emitter.screen->points[i].g = 255;
+				emitter.screen->points[i].b = 255;
+			}
+		}
+		IlluminateWCSFromEmitter(emitter, cube, world, 100, colsToIlluminate);
+	}
+	cout << "Illuminated" << endl;
+
+
+	///Display results
+	{
+		mainViewer->addCoordinateSystem(50);
+		cout << "Cube display" << endl;
+		AddPointCloud(cube.cloud, "cube");
+		cout << "Emitter display" << endl;
+		AddPointCloud(emitter.screen, "emitter");
+
+		cout << "World display" << endl;
+		AddPointCloud(world, "world");
+
+		ClearViewer();
+	}
+
+
+
+
+	//pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("3asiewer"));;
+	//viewer->addPointCloud(world, "cloud");
+	//viewer->addCoordinateSystem(50);
+	//viewer->spin();
+
+	//cout << "cleared" << endl;
+	//viewer->removeAllPointClouds();
+	//viewer->spin();
 
 
 
 	cout << "done" << endl;
-	mainViewer->spin();
+	//mainViewer->spin();
 	//getchar();
 }
