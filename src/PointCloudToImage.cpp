@@ -183,8 +183,8 @@
 //}
 //
 //
-//
-//cv::Mat ToImage(PointCloudPtr cloud, uint zPlane = 300, uint imgWidth = 1920, uint imgHeight = 1080)
+////ORIGINAL
+//cv::Mat ToImage1(PointCloudPtr cloud, uint zPlane = 300, uint imgWidth = 1920, uint imgHeight = 1080)
 //{
 //	cv::Mat image(imgHeight, imgWidth, CV_8UC3, cv::Scalar(0, 0, 0));
 //
@@ -228,7 +228,7 @@
 //	//SaveXYZPointCloud("imgCloud.xyz", cloud2->points);
 //
 //
-//	int cWidth = 100 * imgWidth/imgHeight, cHeight = 100;
+//	int cWidth = 100 * imgWidth / imgHeight, cHeight = 100;
 //
 //	int minX = -cWidth / 2, maxX = cWidth / 2;
 //	int minY = -cHeight / 2, maxY = cHeight / 2;
@@ -236,7 +236,7 @@
 //
 //	for_each(imgCloud->points.begin(), imgCloud->points.end(), [minX, minY, cWidth, cHeight, imgWidth, imgHeight](PointT &point)
 //	{
-//		point.x = imgWidth -  (int)((((float)(point.x - minX)) / (float)cWidth) * imgWidth);
+//		point.x = imgWidth - (int)((((float)(point.x - minX)) / (float)cWidth) * imgWidth);
 //		point.y = imgHeight - (int)((((float)(point.y - minY)) / (float)cHeight) * imgHeight);
 //	});
 //
@@ -245,13 +245,133 @@
 //	{
 //		if (INRANGE(imgCloud->points[i].x, 0, imgWidth - 1) && INRANGE(imgCloud->points[i].y, 0, imgHeight - 1))
 //		{
-//			image.at<Vec3b>(Point( imgCloud->points[i].x, imgCloud->points[i].y)) = Vec3b(imgCloud->points[i].b, imgCloud->points[i].g, imgCloud->points[i].r);
+//			image.at<Vec3b>(Point(imgCloud->points[i].x, imgCloud->points[i].y)) = Vec3b(imgCloud->points[i].b, imgCloud->points[i].g, imgCloud->points[i].r);
 //		}
 //	}
 //	return image;
 //}
 //
+//using namespace Eigen;
+//struct Plane
+//{
+//	Vector3f point;
+//	Vector3f normal;
+//	Plane(Vector3f p, Vector3f n) : point(p), normal(n)
+//	{
 //
+//	}
+//	Plane()
+//	{
+//	}
+//};
+//Vector3f GetIntersectionPointVectorAndPlane(Vector3f rayV, Vector3f rayP, Vector3f planeN, Vector3f planeP)
+//{
+//	float d = planeP.dot(-planeN);
+//	float t = -(d + rayP.z() * planeN.z() + rayP.y() * planeN.y() + rayP.x() * planeN.x()) / (rayV.z() * planeN.z() + rayV.y() * planeN.y() + rayV.x() * planeN.x());
+//	return rayP + t * rayV;
+//}
+//Matrix3f AlignToVector(Vector3f vecFrom, Vector3f vecTo)
+//{
+//	vecFrom.normalize();
+//	vecTo.normalize();
+//	Vector3f cross = vecFrom.cross(vecTo);
+//	cross.normalize();
+//	float angle = acos(vecFrom.dot(vecTo));
+//	AngleAxisf aa(angle, cross);
+//	return aa.toRotationMatrix();
+//}
+//cv::Mat ToImage(PointCloudPtr cloud, Vector3f camPosition, Plane camPlane, Matrix4f toWorld, uint imgWidth = 640, uint imgHeight = 480)
+//{
+//	cv::Mat image(imgHeight, imgWidth, CV_8UC3, cv::Scalar(0, 0, 0));
+//
+//	PointCloudT::Ptr imgCloud(new PointCloudT);///tgt
+//	imgCloud->resize(cloud->size());
+//
+//	Vector3f rayPoint, rayVector;
+//
+//	//cloud1->points[0].x = 150;
+//	//cloud1->points[0].y = 200;
+//	//cloud1->points[0].z = 400;
+//
+//
+//	for (size_t i = 0; i < cloud->size(); i++)
+//	{
+//		rayPoint[0] = cloud->points[i].x;
+//		rayPoint[1] = cloud->points[i].y;
+//		rayPoint[2] = cloud->points[i].z;
+//		rayVector = rayPoint - camPosition;
+//
+//		rayVector.normalize();
+//
+//		Vector3f temp = GetIntersectionPointVectorAndPlane(rayVector, rayPoint, camPlane.normal, camPlane.point);
+//
+//		imgCloud->points[i].x = temp.x();
+//		imgCloud->points[i].y = temp.y();
+//		imgCloud->points[i].z = temp.z();
+//		imgCloud->points[i].r = cloud->points[i].r;
+//		imgCloud->points[i].g = cloud->points[i].g;
+//		imgCloud->points[i].b = cloud->points[i].b;
+//	}
+//
+//	cout << "imgCloud" << endl;
+//	ShowPointCloud(imgCloud, "sdfcsdf");
+//
+//	//SaveXYZPointCloud("imgCloud.xyz", cloud2->points);
+//
+//	Matrix4f trans = Matrix4f::Identity();
+//	//trans(0, 3) = -camPlane.point.x();
+//	//trans(1, 3) = -camPlane.point.y();
+//	//trans(2, 3) = -camPlane.point.z();
+//	//pcl::transformPointCloud(*imgCloud, *imgCloud, trans);
+//	//ShowPointCloud(imgCloud, "sdfcsdf");
+//
+//	//trans = Matrix4f::Identity();
+//	//if (camPlane.normal.z() < 0)
+//	//{
+//	//	trans.block(0, 0, 3, 3) = AlignToVector(camPlane.normal, Vector3f(0, 0, -1));
+//	//}
+//	//else
+//	//{
+//	//	trans.block(0, 0, 3, 3) = AlignToVector(camPlane.normal, Vector3f(0, 0, 1));
+//	//}
+//	////trans(0, 3) = -camPosition.x();
+//	////trans(1, 3) = -camPosition.y();
+//	////trans(2, 3) = -camPosition.z();
+//	//pcl::transformPointCloud(*imgCloud, *imgCloud, trans);
+//	////camPosition = trans.block(0, 0, 3, 3) * camPosition;
+//	////trans = Matrix4f::Identity();
+//	////trans(0, 3) = -camPosition.x();
+//	////trans(1, 3) = -camPosition.y();
+//	////trans(2, 3) = -camPosition.z();
+//	////pcl::transformPointCloud(*imgCloud, *imgCloud, trans);
+//	//ShowPointCloud(imgCloud, "sdfcsdf");
+//
+//
+//	pcl::transformPointCloud(*imgCloud, *imgCloud, toWorld.inverse());
+//
+//	ShowPointCloud(imgCloud, "sdfcsdf");
+//	int cWidth = 100 * imgWidth / imgHeight, cHeight = 100;
+//
+//	int minX = -cWidth / 2, maxX = cWidth / 2;
+//	int minY = -cHeight / 2, maxY = cHeight / 2;
+//
+//
+//	for_each(imgCloud->points.begin(), imgCloud->points.end(), [minX, minY, cWidth, cHeight, imgWidth, imgHeight](PointT &point)
+//	{
+//		point.x = imgWidth - (int)((((float)(point.x - minX)) / (float)cWidth) * imgWidth);
+//		point.y = imgHeight - (int)((((float)(point.y - minY)) / (float)cHeight) * imgHeight);
+//	});
+//
+//
+//	for (size_t i = 0; i < imgCloud->size(); i++)
+//	{
+//		if (INRANGE(imgCloud->points[i].x, 0, imgWidth - 1) && INRANGE(imgCloud->points[i].y, 0, imgHeight - 1))
+//		{
+//			image.at<Vec3b>(Point(imgCloud->points[i].x, imgCloud->points[i].y)) = Vec3b(imgCloud->points[i].b, imgCloud->points[i].g, imgCloud->points[i].r);
+//		}
+//	}
+//	return image;
+//}
 //
 //
 //Mat BlackWhite_To_RedGreen(Mat& I)
@@ -319,31 +439,75 @@
 //	std::cout << "Loaded: " << cloud1->size() << " points" << endl;
 //
 //
-//	PointT p(1, 1, 1);
-//	p.x = 0; p.y = 0; p.z = 1000;
-//	mainViewer->addLine<pcl::PointXYZRGB>(PointT(1, 1, 1), p, 1, 0, 0, "line");
-//	//mainViewer->addSphere<pcl::PointXYZRGB>(PointT(1, 1, 1), 10, 1, 0, 0, "origin");
-//	ShowPointCloud(cloud1);
+//	uint imgWidth = 640, imgHeight = 480;
 //
-//	uint imgWidth = 1600, imgHeight = 850;
-//	Mat image = ToImage(cloud1, 300, imgWidth, imgHeight), smallImage, bigImage;
+//
+//	//PointT p(1, 1, 1);
+//	//p.x = 0; p.y = 0; p.z = 1000;
+//	//mainViewer->addLine<pcl::PointXYZRGB>(PointT(1, 1, 1), p, 1, 0, 0, "line");
+//	////mainViewer->addSphere<pcl::PointXYZRGB>(PointT(1, 1, 1), 10, 1, 0, 0, "origin");
+//	//ShowPointCloud(cloud1);
+//	//Mat image = ToImage(cloud1, 300, imgWidth, imgHeight), smallImage, bigImage;
+//
+//	Mat image;
+//	{
+//		//Vector3f camPosition, camVector;
+//		float focalLength = 50;
+//
+//
+//		//camPosition = Vector3f(100, 0, 0);
+//		//camVector = Vector3f(-18, -3, 500) - camPosition;
+//		//camVector.normalize();
+//
+//		AngleAxisf aa((-18.0/180.0*M_PI), Vector3f(0,1,0));
+//		Vector4f vec(0, 0, 1, 0), origin(0,0,0,1), planeP(0, 0, 50, 1);
+//		Matrix4f tra = Matrix4f::Identity();
+//		tra(0, 3) = 50;
+//		tra.block(0,0,3,3) = aa.toRotationMatrix();
+//		origin = tra * origin;
+//		planeP = tra * planeP;
+//		vec = tra * vec;
+//		vec.normalize();
+//
+//
+//		Plane camPlane(Vector3f(planeP.x(), planeP.y(), planeP.z()), Vector3f(vec.x(), vec.y(), vec.z()));
+//		//{
+//		//	Vector3f temp;
+//		//	temp[0] = camPosition.x() + focalLength * camVector.x();
+//		//	temp[1] = camPosition.y() + focalLength * camVector.y();
+//		//	temp[2] = camPosition.z() + focalLength * camVector.z();
+//		//	camPlane = Plane(temp, camVector);
+//		//}
+//
+//		PointT p(1, 1, 1), p1(0, 0, 0);
+//		p.x = origin.x(); p.y = origin.y(); p.z = origin.z();
+//		p1.x = origin.x() + 500*vec.x(); p1.y = origin.x() + 500 * vec.y(); p1.z = origin.x() + 500 * vec.z();
+//		mainViewer->addLine<pcl::PointXYZRGB>(p, p1, 255, 0, 0, "line");
+//		//mainViewer->addSphere<pcl::PointXYZRGB>(PointT(1, 1, 1), 10, 1, 0, 0, "origin");
+//		mainViewer->addCoordinateSystem(50);
+//		ShowPointCloud(cloud1);
+//		cout << "To image" << endl;
+//
+//
+//		image = ToImage(cloud1, Vector3f(origin.x(), origin.y(), origin.z()), camPlane, tra);
+//	}
 //
 //	string windowName = "Cloud2Image";
 //
 //	namedWindow(windowName, WINDOW_NORMAL);
-//	resizeWindow(windowName, 720 * imgWidth / imgHeight, 720);
+//	resizeWindow(windowName, 360 * imgWidth / imgHeight, 360);
 //
 //	imshow(windowName, image);
 //	waitKey();
 //
 //
-//	cv::resize(image, smallImage, cv::Size(), 0.25, 0.25);
-//	cv::resize(smallImage, bigImage, cv::Size(), 4, 4);
+//	//cv::resize(image, smallImage, cv::Size(), 0.25, 0.25);
+//	//cv::resize(smallImage, bigImage, cv::Size(), 4, 4);
 //
-//	imshow(windowName, smallImage);
-//	waitKey();
-//	imshow(windowName, bigImage);
-//	waitKey();
+//	//imshow(windowName, smallImage);
+//	//waitKey();
+//	//imshow(windowName, bigImage);
+//	//waitKey();
 //
 //	imwrite("CloudImage.png", image);
 //	return (0);

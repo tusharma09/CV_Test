@@ -279,7 +279,7 @@ inline void AddCube(PointT center, string name = "", float length = 1, int r = 2
 	//mainViewer->removeAllShapes();
 }
 
-void ClearViewer()
+void ClearayVectoriewer()
 {
 	mainViewer->removeAllPointClouds();
 	mainViewer->spinOnce();
@@ -318,6 +318,7 @@ struct Cube
 {
 	PointCloudPtr cloud;
 	vector<Plane> cubeFaces;
+	Matrix4f toWorld;
 };
 struct Emitter
 {
@@ -329,7 +330,23 @@ struct Emitter
 	int hResolution;
 	vector<vector <Vector3f>> rays;
 	PointCloudPtr screen;
+	Matrix4f toCamera;
 
+};
+struct Camera
+{
+	Vector3f position;
+	Vector3f normalVectorFromEmitter;
+	float focalLength;
+	float vFOV;
+	float hFOV;
+	int vResolution;
+	int hResolution;
+	PointCloudPtr screen;
+	vector<Vector3f> fovCornersOriginal;
+	vector<Vector3f> fovCorners;
+	Plane cameraPlane;
+	Matrix4f toWorld;
 };
 
 const float resolutionForCube = 1; ///1 mm
@@ -345,11 +362,11 @@ Plane FitPlane(Vector3f p1, Vector3f p2, Vector3f p3)
 	return	Plane(center, normal);
 }
 
-Vector3f GetIntersectionPointVectorAndPlane(Vector3f rayD, Vector3f rayP, Vector3f planeN, Vector3f planeP)
+Vector3f GetIntersectionPointVectorAndPlane(Vector3f rayV, Vector3f rayP, Vector3f planeN, Vector3f planeP)
 {
 	float d = planeP.dot(-planeN);
-	float t = -(d + rayP.z() * planeN.z() + rayP.y() * planeN.y() + rayP.x() * planeN.x()) / (rayD.z() * planeN.z() + rayD.y() * planeN.y() + rayD.x() * planeN.x());
-	return rayP + t * rayD;
+	float t = -(d + rayP.z() * planeN.z() + rayP.y() * planeN.y() + rayP.x() * planeN.x()) / (rayV.z() * planeN.z() + rayV.y() * planeN.y() + rayV.x() * planeN.x());
+	return rayP + t * rayV;
 }
 
 Vector3f GetIntersectionPointVectorAndPlane1(Vector3f rayVector, Vector3f rayPoint, Vector3f planeNormal, Vector3f planePoint)
@@ -389,6 +406,7 @@ inline int ToVecIndex(int i, int j, int maxCol)
 ///A Cube actually has same dimensions in all sides but question is confusing and might be referring cuboid
 void CreateCube(float length, float width, float height, Matrix4f toWorld, Cube &cube)
 {
+	cube.toWorld = toWorld;
 	cube.cloud = PointCloudPtr(new PointCloudT);
 	cube.cubeFaces.clear();
 
@@ -460,6 +478,7 @@ void CreateCube(float length, float width, float height, Matrix4f toWorld, Cube 
 
 void CreateEmitter(float verticalFOV, float horizontalFOV, int verticalResolution, int horizontalResolution, Matrix4f toWorld, Emitter &emitter)
 {
+	emitter.toCamera = toWorld;
 	emitter.hFOV = horizontalFOV;
 	emitter.vFOV = verticalFOV;
 	emitter.hResolution = horizontalResolution;
@@ -500,7 +519,7 @@ void CreateEmitter(float verticalFOV, float horizontalFOV, int verticalResolutio
 	{
 		Vector3f tempVector(0, 0, 1);
 		AngleAxisf aa;
-		int factor = 20;
+		int factor = 50;
 
 
 		///top left
@@ -587,6 +606,141 @@ void CreateEmitter(float verticalFOV, float horizontalFOV, int verticalResolutio
 	}
 
 
+}
+
+
+void CreateCamera(float verticalFOV, float horizontalFOV, int verticalResolution, int horizontalResolution, float focalLength, Vector3f camPosition, Vector3f camVector, Matrix4f toWorld, Camera &camera)
+{
+	camera.toWorld = toWorld;
+	camera.hFOV = horizontalFOV;
+	camera.vFOV = verticalFOV;
+	camera.hResolution = horizontalResolution;
+	camera.vResolution = verticalResolution;
+	camera.focalLength = focalLength;
+	camera.position = camPosition;
+	camera.screen = PointCloudPtr(new PointCloudT);
+
+	{
+		Vector3f temp;
+		temp[0] = camPosition.x() + focalLength * camVector.x();
+		temp[1] = camPosition.y() + focalLength * camVector.y();
+		temp[2] = camPosition.z() + focalLength * camVector.z();
+
+		camera.cameraPlane = Plane(temp, camVector);
+	}
+
+	/////Create a projected ray board towards z-axis
+	//{
+	//	PointT temp(255,255,255);
+	//	for (int i = (-emitter.hResolution / 2) + 0.5; i < emitter.hResolution / 2; i++)
+	//	{
+	//		for (int j = (-emitter.vResolution / 2) + 0.5; j < emitter.vResolution / 2; j++)
+	//		{
+	//			temp.x = i; temp.y = j; temp.z = 1000;
+	//			cloud->points.push_back(temp);
+	//		}
+	//	}
+	//	cloud->width = cloud->points.size();
+	//	cloud->height = 1;
+	//}
+	/////Find z to satisfy FOV
+	//{
+	//	Vector3f v1, v2;
+	//	v1[0] = (-emitter.hResolution / 2) + 0.5;
+	//	v1[1] = (emitter.vResolution / 2) - 0.5;
+	//	v1[2] = 0;
+	//	v2[0] = (emitter.hResolution / 2) - 0.5;
+	//	v2[1] = (emitter.vResolution / 2) - 0.5;
+	//	v2[2] = 0;
+	//}
+
+
+	//vector<Vector3f> vectorsFOV;///FOV vectors: top left, top right, bottom left, bottom right
+
+	///at distance "factor": if resolution comes too high, rays will be too close and may be distorted because of rounding off issue from system.
+	{
+		Vector3f tempVector(0, 0, 1);
+		AngleAxisf aa;
+		int factor = 20;
+
+
+		///top left
+		aa = AngleAxisf(ToRadian(-camera.vFOV / 2), Vector3f(1, 0, 0));
+		tempVector = aa.toRotationMatrix() * tempVector;
+
+		aa = AngleAxisf(ToRadian(-camera.hFOV / 2), Vector3f(0, 1, 0));
+		tempVector = aa.toRotationMatrix() * tempVector;
+
+		camera.fovCornersOriginal.push_back(tempVector * factor);
+
+		///top right
+		tempVector = Vector3f(0, 0, 1);
+
+		aa = AngleAxisf(ToRadian(-camera.vFOV / 2), Vector3f(1, 0, 0));
+		tempVector = aa.toRotationMatrix() * tempVector;
+
+		aa = AngleAxisf(ToRadian(camera.hFOV / 2), Vector3f(0, 1, 0));
+		tempVector = aa.toRotationMatrix() * tempVector;
+
+		camera.fovCornersOriginal.push_back(tempVector * factor);
+
+		///bottom left
+		tempVector = Vector3f(0, 0, 1);
+
+		aa = AngleAxisf(ToRadian(camera.vFOV / 2), Vector3f(1, 0, 0));
+		tempVector = aa.toRotationMatrix() * tempVector;
+
+		aa = AngleAxisf(ToRadian(-camera.hFOV / 2), Vector3f(0, 1, 0));
+		tempVector = aa.toRotationMatrix() * tempVector;
+
+		camera.fovCornersOriginal.push_back(tempVector * factor);
+
+		///bottom right
+		tempVector = Vector3f(0, 0, 1);
+
+		aa = AngleAxisf(ToRadian(camera.vFOV / 2), Vector3f(1, 0, 0));
+		tempVector = aa.toRotationMatrix() * tempVector;
+
+		aa = AngleAxisf(ToRadian(camera.hFOV / 2), Vector3f(0, 1, 0));
+		tempVector = aa.toRotationMatrix() * tempVector;
+
+		camera.fovCornersOriginal.push_back(tempVector * factor);
+	}
+
+
+
+	for (Vector3f& point : camera.fovCorners)
+	{
+		Vector4f temp(point.x(), point.y(), point.z(), 1);
+		temp = toWorld * temp;
+		point[0] = temp.x();
+		point[1] = temp.y();
+		point[2] = temp.z();
+	}
+
+
+	///Create a projected ray board towards z-axis
+	{
+		//float horizontalIncrement = abs((camera.vectorsFOV[0].x()) - (camera.vectorsFOV[1].x())) / camera.hResolution;
+		//float verticalIncrement = abs((camera.vectorsFOV[0].y()) - (camera.vectorsFOV[2].y())) / camera.vResolution;
+		//PointT temp(255, 0, 0);
+		//temp.x = 0; temp.y = 0; temp.z = 0;
+		//camera.screen->points.push_back(temp);///Emitter itself
+
+		//for (float j = camera.vectorsFOV[2].y(); j < (camera.vectorsFOV[1].y() - verticalIncrement * 0.5); j += verticalIncrement)
+		//{
+		//	for (float i = (camera.vectorsFOV[2].x()); i < (camera.vectorsFOV[1].x() - horizontalIncrement * 0.5); i += horizontalIncrement)
+		//	{
+		//		temp.x = i; temp.y = j, temp.z = camera.vectorsFOV[0].z();
+		//		camera.screen->points.push_back(temp);
+		//	}
+		//}
+
+		//camera.screen->width = camera.screen->points.size();
+		//camera.screen->height = 1;
+	}
+
+	//pcl::transformPointCloud(*camera.screen, *camera.screen, toWorld);
 }
 
 
@@ -702,7 +856,7 @@ vector<int> GetRaySplashOnCube(Vector3f rayVector, Vector3f rayPoint, Cube &cube
 			//AddPointCloud(cube.cloud);
 			//mainViewer->removeAllShapes();
 			//mainViewer->spinOnce();
-			//ClearViewer();
+			//ClearayVectoriewer();
 		}
 
 
@@ -731,7 +885,7 @@ void IlluminateWCSFromEmitter(Emitter &emitter, Cube &cube, PointCloudPtr world,
 	//PointCloudPtr world(new PointCloudT);
 	//*world = *cube.cloud;
 	world->points.clear();
-	world->points.reserve(emitter.vResolution*emitter.hResolution / 2);
+	world->points.resize(emitter.vResolution*emitter.hResolution / 2);
 	pcl::search::KdTree<PointT> kdtree;
 	kdtree.setInputCloud(cube.cloud);
 
@@ -780,51 +934,53 @@ void IlluminateWCSFromEmitter(Emitter &emitter, Cube &cube, PointCloudPtr world,
 
 
 
-cv::Mat ToImage(PointCloudPtr cloud, uint zPlane = 300, uint imgWidth = 1920, uint imgHeight = 1080)
+cv::Mat ToImage(PointCloudPtr cloud, Vector3f camPosition, Plane camPlane, Matrix4f toWorld, uint imgWidth = 640, uint imgHeight = 480)
 {
 	cv::Mat image(imgHeight, imgWidth, CV_8UC3, cv::Scalar(0, 0, 0));
 
 	PointCloudT::Ptr imgCloud(new PointCloudT);///tgt
-
 	imgCloud->resize(cloud->size());
-	vector<float> Pp(3, 0), Pn(3, 0);
-	Pp[2] = zPlane; Pn[2] = 1;
-	vector<float> Rp(3, 0), Rv(3);
 
-	//cloud1->points[0].x = 150;
-	//cloud1->points[0].y = 200;
-	//cloud1->points[0].z = 400;
-
+	Vector3f rayPoint, rayVector;
 
 	for (size_t i = 0; i < cloud->size(); i++)
 	{
-		Rp[0] = cloud->points[i].x;
-		Rp[1] = cloud->points[i].y;
-		Rp[2] = cloud->points[i].z;
+		rayPoint[0] = cloud->points[i].x;
+		rayPoint[1] = cloud->points[i].y;
+		rayPoint[2] = cloud->points[i].z;
+		rayVector = rayPoint - camPosition;
 
-		float mag = sqrt(pow(Rp[0], 2) + pow(Rp[1], 2) + pow(Rp[2], 2));
+		rayVector.normalize();
 
-		Rv[0] = Rp[0] / mag;
-		Rv[1] = Rp[1] / mag;
-		Rv[2] = Rp[2] / mag;
+		Vector3f temp = GetIntersectionPointVectorAndPlane(rayVector, rayPoint, camPlane.normal, camPlane.point);
 
-		///http://www.ambrsoft.com/TrigoCalc/Plan3D/PlaneLineIntersection_.htm
-		float t = (Pp[2]) / Rv[2];
-
-		imgCloud->points[i].x = Rv[0] * t;
-		imgCloud->points[i].y = Rv[1] * t;
-		imgCloud->points[i].z = Rv[2] * t;
+		imgCloud->points[i].x = temp.x();
+		imgCloud->points[i].y = temp.y();
+		imgCloud->points[i].z = temp.z();
 		imgCloud->points[i].r = cloud->points[i].r;
 		imgCloud->points[i].g = cloud->points[i].g;
 		imgCloud->points[i].b = cloud->points[i].b;
 	}
 
+	cout << "to imgCloud" << endl;
+
+	PointT p(1, 1, 1), p1(0, 0, 0);
+	p.x = camPosition.x(); p.y = camPosition.y(); p.z = camPosition.z();
+	p1.x = camPosition.x() + 50 * camPlane.normal.x(); p1.y = camPosition.y() + 50 * camPlane.normal.y(); p1.z = camPosition.z() + 50 * camPlane.normal.z();
+	mainViewer->addLine<pcl::PointXYZRGB>(p, p1, 255, 0, 0, "line");
+	mainViewer->addCoordinateSystem(50);
+	ShowPointCloud(cloud, "sdfcsdf");
 	ShowPointCloud(imgCloud, "sdfcsdf");
+	mainViewer->removeAllShapes();
 
 	//SaveXYZPointCloud("imgCloud.xyz", cloud2->points);
 
+	Matrix4f trans = Matrix4f::Identity();
 
-	int cWidth = 100 * imgWidth/imgHeight, cHeight = 100;
+	pcl::transformPointCloud(*imgCloud, *imgCloud, toWorld.inverse());
+
+	//ShowPointCloud(imgCloud, "sdfcsdf");
+	int cWidth = 100 * imgWidth / imgHeight, cHeight = 100;
 
 	int minX = -cWidth / 2, maxX = cWidth / 2;
 	int minY = -cHeight / 2, maxY = cHeight / 2;
@@ -832,7 +988,7 @@ cv::Mat ToImage(PointCloudPtr cloud, uint zPlane = 300, uint imgWidth = 1920, ui
 
 	for_each(imgCloud->points.begin(), imgCloud->points.end(), [minX, minY, cWidth, cHeight, imgWidth, imgHeight](PointT &point)
 	{
-		point.x = imgWidth -  (int)((((float)(point.x - minX)) / (float)cWidth) * imgWidth);
+		point.x = imgWidth - (int)((((float)(point.x - minX)) / (float)cWidth) * imgWidth);
 		point.y = imgHeight - (int)((((float)(point.y - minY)) / (float)cHeight) * imgHeight);
 	});
 
@@ -841,7 +997,7 @@ cv::Mat ToImage(PointCloudPtr cloud, uint zPlane = 300, uint imgWidth = 1920, ui
 	{
 		if (INRANGE(imgCloud->points[i].x, 0, imgWidth - 1) && INRANGE(imgCloud->points[i].y, 0, imgHeight - 1))
 		{
-			image.at<Vec3b>(Point( imgCloud->points[i].x, imgCloud->points[i].y)) = Vec3b(imgCloud->points[i].b, imgCloud->points[i].g, imgCloud->points[i].r);
+			image.at<Vec3b>(Point(imgCloud->points[i].x, imgCloud->points[i].y)) = Vec3b(imgCloud->points[i].b, imgCloud->points[i].g, imgCloud->points[i].r);
 		}
 	}
 	return image;
@@ -853,9 +1009,12 @@ int main(int argc, char* argv[])
 {
 	InitialiseViewer();
 
-	PointT temp, temp1;
-	temp.x = 10; temp.y = 0; temp.z = 0;
-	temp1.x = 0; temp1.y = 0; temp1.z = 0;
+	{
+		PointT temp, temp1;
+		temp.x = 10; temp.y = 0; temp.z = 0;
+		temp1.x = 0; temp1.y = 0; temp1.z = 0;
+	}
+
 
 	//////red:x, green:y blue:z
 	//mainViewer->addLine(temp1, temp, 255, 255, 0, "line1");
@@ -884,6 +1043,7 @@ int main(int argc, char* argv[])
 	Emitter emitter;
 	CreateEmitter(24, 32, 48, 64, Matrix4f::Identity(), emitter);
 	cout << "Emitter Created" << endl;
+
 
 
 	PointCloudPtr world(new PointCloudT);
@@ -917,11 +1077,50 @@ int main(int argc, char* argv[])
 		cout << "World display" << endl;
 		AddPointCloud(world, "world");
 
-		ClearViewer();
+		ClearayVectoriewer();
 	}
 
 
+	Mat camImage, emitterImage;
+	///Grab images
+	{
+		float focalLength = 50;
 
+		AngleAxisf aa((-45.0 / 180.0*M_PI), Vector3f(0, 1, 0));
+		Vector4f camVector(0, 0, 1, 0), camPosition(0, 0, 0, 1), camPlanePoint(0, 0, 50, 1);
+		Matrix4f transformation = Matrix4f::Identity();
+		transformation(0, 3) = 50;
+		transformation.block(0, 0, 3, 3) = aa.toRotationMatrix();
+		camPosition = transformation * camPosition;
+		camPlanePoint = transformation * camPlanePoint;
+		camVector = transformation * camVector;
+		Vector3f camVector1(camVector.x(), camVector.y(), camVector.z());
+		camVector1.normalize();
+
+		Camera camera;
+		CreateCamera(24, 32, 48, 64, focalLength, Vector3f(camPosition.x(), camPosition.y(), camPosition.z()), Vector3f(camVector.x(), camVector.y(), camVector.z()), transformation, camera);
+		cout << "Camera Created" << endl;
+
+		Plane camPlane(Vector3f(camPlanePoint.x(), camPlanePoint.y(), camPlanePoint.z()), camVector1);
+
+		camImage = ToImage(world, Vector3f(camPosition.x(), camPosition.y(), camPosition.z()), camPlane, transformation);
+		Vector3f emitterPlanePoint;
+		emitterPlanePoint[0] = emitter.screen->points[emitter.screen->points.size() / 2].x;
+		emitterPlanePoint[1] = emitter.screen->points[emitter.screen->points.size() / 2].y;
+		emitterPlanePoint[2] = emitter.screen->points[emitter.screen->points.size() / 2].z;
+		emitterImage = ToImage(world, emitter.position, Plane(emitterPlanePoint, emitter.normalVectorFromEmitter), Matrix4f::Identity());
+	}
+
+
+	uint imgWidth = 640, imgHeight = 480;
+	string windowName = "Cloud2Image";
+	namedWindow(windowName, WINDOW_NORMAL);
+	resizeWindow(windowName, 360 * imgWidth / imgHeight, 360);
+
+	imshow(windowName, camImage);
+	waitKey();
+	imshow(windowName, emitterImage);
+	waitKey();
 
 	//pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer("3asiewer"));;
 	//viewer->addPointCloud(world, "cloud");
