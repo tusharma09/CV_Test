@@ -331,6 +331,8 @@ struct Emitter
 	vector<vector <Vector3f>> rays;
 	PointCloudPtr screen;
 	Matrix4f toCamera;
+	vector<Vector3f> fovCornersOriginal;
+	vector<Vector3f> fovCorners;
 
 };
 struct Camera
@@ -476,7 +478,7 @@ void CreateCube(float length, float width, float height, Matrix4f toWorld, Cube 
 }
 
 
-void CreateEmitter(float verticalFOV, float horizontalFOV, int verticalResolution, int horizontalResolution, Matrix4f toWorld, Emitter &emitter)
+void CreateEmitter(float verticalFOV, float horizontalFOV, int verticalResolution, int horizontalResolution, int screenDistance, Matrix4f toWorld, Emitter &emitter)
 {
 	emitter.toCamera = toWorld;
 	emitter.hFOV = horizontalFOV;
@@ -513,25 +515,15 @@ void CreateEmitter(float verticalFOV, float horizontalFOV, int verticalResolutio
 	//}
 
 
-	vector<Vector3f> vectorsFOV;///FOV vectors: top left, top right, bottom left, bottom right
-
+	///FOV vectors: top left, top right, bottom left, bottom right
+	vector<Vector3f> vectorsFOV;
 	///at distance "factor": if resolution comes too high, rays will be too close and may be distorted because of rounding off issue from system.
 	{
 		Vector3f tempVector(0, 0, 1);
 		AngleAxisf aa;
-		int factor = 50;
 
 
 		///top left
-		aa = AngleAxisf(ToRadian(-emitter.vFOV / 2), Vector3f(1, 0, 0));
-		tempVector = aa.toRotationMatrix() * tempVector;
-
-		aa = AngleAxisf(ToRadian(-emitter.hFOV / 2), Vector3f(0, 1, 0));
-		tempVector = aa.toRotationMatrix() * tempVector;
-
-		vectorsFOV.push_back(tempVector * factor);
-
-		///top right
 		tempVector = Vector3f(0, 0, 1);
 
 		aa = AngleAxisf(ToRadian(-emitter.vFOV / 2), Vector3f(1, 0, 0));
@@ -540,7 +532,19 @@ void CreateEmitter(float verticalFOV, float horizontalFOV, int verticalResolutio
 		aa = AngleAxisf(ToRadian(emitter.hFOV / 2), Vector3f(0, 1, 0));
 		tempVector = aa.toRotationMatrix() * tempVector;
 
-		vectorsFOV.push_back(tempVector * factor);
+		tempVector = GetIntersectionPointVectorAndPlane(tempVector, Vector3f(0,0,0), Vector3f(0, 0, 1), Vector3f(0, 0, screenDistance));
+
+		emitter.fovCornersOriginal.push_back(tempVector);
+
+		///top right
+		tempVector = Vector3f(0, 0, 1);
+		aa = AngleAxisf(ToRadian(-emitter.vFOV / 2), Vector3f(1, 0, 0));
+		tempVector = aa.toRotationMatrix() * tempVector;
+
+		aa = AngleAxisf(ToRadian(-emitter.hFOV / 2), Vector3f(0, 1, 0));
+		tempVector = aa.toRotationMatrix() * tempVector;
+		tempVector = GetIntersectionPointVectorAndPlane(tempVector, Vector3f(0, 0, 0), Vector3f(0, 0, 1), Vector3f(0, 0, screenDistance));
+		emitter.fovCornersOriginal.push_back(tempVector);
 
 		///bottom left
 		tempVector = Vector3f(0, 0, 1);
@@ -548,10 +552,10 @@ void CreateEmitter(float verticalFOV, float horizontalFOV, int verticalResolutio
 		aa = AngleAxisf(ToRadian(emitter.vFOV / 2), Vector3f(1, 0, 0));
 		tempVector = aa.toRotationMatrix() * tempVector;
 
-		aa = AngleAxisf(ToRadian(-emitter.hFOV / 2), Vector3f(0, 1, 0));
+		aa = AngleAxisf(ToRadian(emitter.hFOV / 2), Vector3f(0, 1, 0));
 		tempVector = aa.toRotationMatrix() * tempVector;
-
-		vectorsFOV.push_back(tempVector * factor);
+		tempVector = GetIntersectionPointVectorAndPlane(tempVector, Vector3f(0, 0, 0), Vector3f(0, 0, 1), Vector3f(0, 0, screenDistance));
+		emitter.fovCornersOriginal.push_back(tempVector);
 
 		///bottom right
 		tempVector = Vector3f(0, 0, 1);
@@ -559,26 +563,26 @@ void CreateEmitter(float verticalFOV, float horizontalFOV, int verticalResolutio
 		aa = AngleAxisf(ToRadian(emitter.vFOV / 2), Vector3f(1, 0, 0));
 		tempVector = aa.toRotationMatrix() * tempVector;
 
-		aa = AngleAxisf(ToRadian(emitter.hFOV / 2), Vector3f(0, 1, 0));
+		aa = AngleAxisf(ToRadian(-emitter.hFOV / 2), Vector3f(0, 1, 0));
 		tempVector = aa.toRotationMatrix() * tempVector;
-
-		vectorsFOV.push_back(tempVector * factor);
+		tempVector = GetIntersectionPointVectorAndPlane(tempVector, Vector3f(0, 0, 0), Vector3f(0, 0, 1), Vector3f(0, 0, screenDistance));
+		emitter.fovCornersOriginal.push_back(tempVector);
 	}
 
 
 	///Create a projected ray board towards z-axis
 	{
-		float horizontalIncrement = abs((vectorsFOV[0].x()) - (vectorsFOV[1].x())) / emitter.hResolution;
-		float verticalIncrement = abs((vectorsFOV[0].y()) - (vectorsFOV[2].y())) / emitter.vResolution;
+		float horizontalIncrement = abs((emitter.fovCornersOriginal[0].x()) - (emitter.fovCornersOriginal[1].x())) / emitter.hResolution;
+		float verticalIncrement = abs((emitter.fovCornersOriginal[0].y()) - (emitter.fovCornersOriginal[2].y())) / emitter.vResolution;
 		PointT temp(255, 0, 0);
 		temp.x = 0; temp.y = 0; temp.z = 0;
 		emitter.screen->points.push_back(temp);///Emitter itself
 
-		for (float j = vectorsFOV[2].y(); j < (vectorsFOV[1].y() - verticalIncrement * 0.5); j += verticalIncrement)
+		for (float j = emitter.fovCornersOriginal[3].y(); j < (emitter.fovCornersOriginal[0].y() - verticalIncrement * 0.5); j += verticalIncrement)
 		{
-			for (float i = (vectorsFOV[2].x()); i < (vectorsFOV[1].x() - horizontalIncrement * 0.5); i += horizontalIncrement)
+			for (float i = (emitter.fovCornersOriginal[3].x()); i < (emitter.fovCornersOriginal[0].x() - horizontalIncrement * 0.5); i += horizontalIncrement)
 			{
-				temp.x = i; temp.y = j, temp.z = vectorsFOV[0].z();
+				temp.x = i; temp.y = j, temp.z = emitter.fovCornersOriginal[0].z();
 				emitter.screen->points.push_back(temp);
 			}
 		}
@@ -661,19 +665,9 @@ void CreateCamera(float verticalFOV, float horizontalFOV, int verticalResolution
 	{
 		Vector3f tempVector(0, 0, 1);
 		AngleAxisf aa;
-		int factor = 20;
 
 
 		///top left
-		aa = AngleAxisf(ToRadian(-camera.vFOV / 2), Vector3f(1, 0, 0));
-		tempVector = aa.toRotationMatrix() * tempVector;
-
-		aa = AngleAxisf(ToRadian(-camera.hFOV / 2), Vector3f(0, 1, 0));
-		tempVector = aa.toRotationMatrix() * tempVector;
-
-		camera.fovCornersOriginal.push_back(tempVector * factor);
-
-		///top right
 		tempVector = Vector3f(0, 0, 1);
 
 		aa = AngleAxisf(ToRadian(-camera.vFOV / 2), Vector3f(1, 0, 0));
@@ -681,8 +675,18 @@ void CreateCamera(float verticalFOV, float horizontalFOV, int verticalResolution
 
 		aa = AngleAxisf(ToRadian(camera.hFOV / 2), Vector3f(0, 1, 0));
 		tempVector = aa.toRotationMatrix() * tempVector;
+		tempVector = GetIntersectionPointVectorAndPlane(tempVector, Vector3f(0, 0, 0), Vector3f(0, 0, 1), Vector3f(0, 0, focalLength));
+		camera.fovCornersOriginal.push_back(tempVector);
 
-		camera.fovCornersOriginal.push_back(tempVector * factor);
+		///top right
+		tempVector = Vector3f(0, 0, 1);
+		aa = AngleAxisf(ToRadian(-camera.vFOV / 2), Vector3f(1, 0, 0));
+		tempVector = aa.toRotationMatrix() * tempVector;
+
+		aa = AngleAxisf(ToRadian(-camera.hFOV / 2), Vector3f(0, 1, 0));
+		tempVector = aa.toRotationMatrix() * tempVector;
+		tempVector = GetIntersectionPointVectorAndPlane(tempVector, Vector3f(0, 0, 0), Vector3f(0, 0, 1), Vector3f(0, 0, focalLength));
+		camera.fovCornersOriginal.push_back(tempVector);
 
 		///bottom left
 		tempVector = Vector3f(0, 0, 1);
@@ -690,10 +694,10 @@ void CreateCamera(float verticalFOV, float horizontalFOV, int verticalResolution
 		aa = AngleAxisf(ToRadian(camera.vFOV / 2), Vector3f(1, 0, 0));
 		tempVector = aa.toRotationMatrix() * tempVector;
 
-		aa = AngleAxisf(ToRadian(-camera.hFOV / 2), Vector3f(0, 1, 0));
+		aa = AngleAxisf(ToRadian(camera.hFOV / 2), Vector3f(0, 1, 0));
 		tempVector = aa.toRotationMatrix() * tempVector;
-
-		camera.fovCornersOriginal.push_back(tempVector * factor);
+		tempVector = GetIntersectionPointVectorAndPlane(tempVector, Vector3f(0, 0, 0), Vector3f(0, 0, 1), Vector3f(0, 0, focalLength));
+		camera.fovCornersOriginal.push_back(tempVector);
 
 		///bottom right
 		tempVector = Vector3f(0, 0, 1);
@@ -701,10 +705,10 @@ void CreateCamera(float verticalFOV, float horizontalFOV, int verticalResolution
 		aa = AngleAxisf(ToRadian(camera.vFOV / 2), Vector3f(1, 0, 0));
 		tempVector = aa.toRotationMatrix() * tempVector;
 
-		aa = AngleAxisf(ToRadian(camera.hFOV / 2), Vector3f(0, 1, 0));
+		aa = AngleAxisf(ToRadian(-camera.hFOV / 2), Vector3f(0, 1, 0));
 		tempVector = aa.toRotationMatrix() * tempVector;
-
-		camera.fovCornersOriginal.push_back(tempVector * factor);
+		tempVector = GetIntersectionPointVectorAndPlane(tempVector, Vector3f(0, 0, 0), Vector3f(0, 0, 1), Vector3f(0, 0, focalLength));
+		camera.fovCornersOriginal.push_back(tempVector);
 	}
 
 
@@ -934,7 +938,7 @@ void IlluminateWCSFromEmitter(Emitter &emitter, Cube &cube, PointCloudPtr world,
 
 
 
-cv::Mat ToImage(PointCloudPtr cloud, Vector3f camPosition, Plane camPlane, Matrix4f toWorld, uint imgWidth = 640, uint imgHeight = 480)
+cv::Mat ToImage(PointCloudPtr cloud, Vector3f camPosition, Plane camPlane, vector<Vector3f> fovCorners, Matrix4f toWorld, uint imgWidth = 160, uint imgHeight = 120)
 {
 	cv::Mat image(imgHeight, imgWidth, CV_8UC3, cv::Scalar(0, 0, 0));
 
@@ -979,12 +983,31 @@ cv::Mat ToImage(PointCloudPtr cloud, Vector3f camPosition, Plane camPlane, Matri
 
 	pcl::transformPointCloud(*imgCloud, *imgCloud, toWorld.inverse());
 
+	{
+		//PointCloudPtr cloud1(new PointCloudT);
+		//for (size_t i = 0; i < fovCorners.size(); i++)
+		//{
+		//	PointT point(0, 255, 0);
+		//	point.x = fovCorners[i].x();
+		//	point.y = fovCorners[i].y();
+		//	point.z = fovCorners[i].z();
+		//	cloud1->points.push_back(point);
+		//}
+		//cloud1->width = cloud1->points.size();
+		//cloud1->height = 1;
+		//cout << "here" << endl;
+		//AddPointCloud(cloud1, "asa");
+		//ShowPointCloud(imgCloud, "sdfcsdf");
+	}
+
 	//ShowPointCloud(imgCloud, "sdfcsdf");
-	int cWidth = 100 * imgWidth / imgHeight, cHeight = 100;
 
-	int minX = -cWidth / 2, maxX = cWidth / 2;
-	int minY = -cHeight / 2, maxY = cHeight / 2;
+	//int minX = -cWidth / 2, maxX = cWidth / 2;
+	//int minY = -cHeight / 2, maxY = cHeight / 2;
+	int minX = fovCorners[1].x(), maxX = fovCorners[0].x();
+	int minY = fovCorners[2].y(), maxY = fovCorners[0].y();
 
+	int cWidth = (maxY - minY) * imgWidth / imgHeight, cHeight = maxY-minY;
 
 	for_each(imgCloud->points.begin(), imgCloud->points.end(), [minX, minY, cWidth, cHeight, imgWidth, imgHeight](PointT &point)
 	{
@@ -1040,9 +1063,27 @@ int main(int argc, char* argv[])
 	cout << "Cube Created" << endl;
 
 
+	float focalLength = 50;
+
 	Emitter emitter;
-	CreateEmitter(24, 32, 48, 64, Matrix4f::Identity(), emitter);
+	CreateEmitter(24, 32, 48, 64, focalLength, Matrix4f::Identity(), emitter);
 	cout << "Emitter Created" << endl;
+
+
+	///Create camera
+	AngleAxisf aa((-45.0 / 180.0*M_PI), Vector3f(0, 1, 0));
+	Vector4f camVector(0, 0, 1, 0), camPosition(0, 0, 0, 1), camPlanePoint(0, 0, 50, 1);
+	Matrix4f transformation = Matrix4f::Identity();
+	transformation(0, 3) = 50;
+	transformation.block(0, 0, 3, 3) = aa.toRotationMatrix();
+	camPosition = transformation * camPosition;
+	camPlanePoint = transformation * camPlanePoint;
+	camVector = transformation * camVector;
+	Vector3f camVector1(camVector.x(), camVector.y(), camVector.z());
+	camVector1.normalize();
+	Camera camera;
+	CreateCamera(24, 32, 48, 64, focalLength, Vector3f(camPosition.x(), camPosition.y(), camPosition.z()), Vector3f(camVector.x(), camVector.y(), camVector.z()), transformation, camera);
+	cout << "Camera Created" << endl;
 
 
 
@@ -1084,31 +1125,14 @@ int main(int argc, char* argv[])
 	Mat camImage, emitterImage;
 	///Grab images
 	{
-		float focalLength = 50;
-
-		AngleAxisf aa((-45.0 / 180.0*M_PI), Vector3f(0, 1, 0));
-		Vector4f camVector(0, 0, 1, 0), camPosition(0, 0, 0, 1), camPlanePoint(0, 0, 50, 1);
-		Matrix4f transformation = Matrix4f::Identity();
-		transformation(0, 3) = 50;
-		transformation.block(0, 0, 3, 3) = aa.toRotationMatrix();
-		camPosition = transformation * camPosition;
-		camPlanePoint = transformation * camPlanePoint;
-		camVector = transformation * camVector;
-		Vector3f camVector1(camVector.x(), camVector.y(), camVector.z());
-		camVector1.normalize();
-
-		Camera camera;
-		CreateCamera(24, 32, 48, 64, focalLength, Vector3f(camPosition.x(), camPosition.y(), camPosition.z()), Vector3f(camVector.x(), camVector.y(), camVector.z()), transformation, camera);
-		cout << "Camera Created" << endl;
-
 		Plane camPlane(Vector3f(camPlanePoint.x(), camPlanePoint.y(), camPlanePoint.z()), camVector1);
 
-		camImage = ToImage(world, Vector3f(camPosition.x(), camPosition.y(), camPosition.z()), camPlane, transformation);
+		camImage = ToImage(world, Vector3f(camPosition.x(), camPosition.y(), camPosition.z()), camPlane, camera.fovCornersOriginal, transformation);
 		Vector3f emitterPlanePoint;
 		emitterPlanePoint[0] = emitter.screen->points[emitter.screen->points.size() / 2].x;
 		emitterPlanePoint[1] = emitter.screen->points[emitter.screen->points.size() / 2].y;
 		emitterPlanePoint[2] = emitter.screen->points[emitter.screen->points.size() / 2].z;
-		emitterImage = ToImage(world, emitter.position, Plane(emitterPlanePoint, emitter.normalVectorFromEmitter), Matrix4f::Identity());
+		emitterImage = ToImage(world, emitter.position, Plane(emitterPlanePoint, emitter.normalVectorFromEmitter), emitter.fovCornersOriginal, Matrix4f::Identity());
 	}
 
 
