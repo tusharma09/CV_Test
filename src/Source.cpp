@@ -992,7 +992,7 @@ cv::Mat ToImage(PointCloudPtr cloud, Vector3f camPosition, Plane camPlane, vecto
 	p.x = camPosition.x(); p.y = camPosition.y(); p.z = camPosition.z();
 	p1.x = camPosition.x() + 50 * camPlane.normal.x(); p1.y = camPosition.y() + 50 * camPlane.normal.y(); p1.z = camPosition.z() + 50 * camPlane.normal.z();
 	mainViewer->addLine<pcl::PointXYZRGB>(p, p1, 255, 0, 0, "line");
-	mainViewer->addCoordinateSystem(50);
+	mainViewer->addCoordinateSystem(25);
 	ShowPointCloud(cloud, "sdfcsdf");
 	ShowPointCloud(imgCloud, "sdfcsdf");
 	mainViewer->removeAllShapes();
@@ -1291,7 +1291,7 @@ void CV_Test(Mat cameraMatrix, float length, float width, float height, Vector3f
 
 	///Display results
 	{
-		mainViewer->addCoordinateSystem(50);
+		mainViewer->addCoordinateSystem(25);
 		cout << "Cube display" << endl;
 		AddPointCloud(cube.cloud, "cube");
 		cout << "Emitter display" << endl;
@@ -1409,7 +1409,7 @@ int main(int argc, char* argv[])
 	cout << "Cube Created" << endl;
 
 
-	float focalLength = 50;
+	float focalLength = 40;
 
 	Emitter emitter;
 	CreateEmitter(24, 32, 48, 64, focalLength, Matrix4f::Identity(), emitter);
@@ -1455,7 +1455,7 @@ int main(int argc, char* argv[])
 
 	///Display results
 	{
-		mainViewer->addCoordinateSystem(50);
+		mainViewer->addCoordinateSystem(25);
 		cout << "Cube display" << endl;
 		AddPointCloud(cube.cloud, "cube");
 		cout << "Emitter display" << endl;
@@ -1483,13 +1483,16 @@ int main(int argc, char* argv[])
 
 
 	uint imgWidth = 640, imgHeight = 480;
-	string windowName = "Cloud2Image";
-	namedWindow(windowName, WINDOW_NORMAL);
-	resizeWindow(windowName, 360 * imgWidth / imgHeight, 360);
+	string leftWindowName = "Left image from camera";
+	string rightWindowName = "Right image from Emitter";
+	namedWindow(leftWindowName, WINDOW_NORMAL);
+	namedWindow(rightWindowName, WINDOW_NORMAL);
+	resizeWindow(leftWindowName, 360 * imgWidth / imgHeight, 360);
+	resizeWindow(rightWindowName, 360 * imgWidth / imgHeight, 360);
 
-	imshow(windowName, camImage);
-	waitKey();
-	imshow(windowName, emitterImage);
+
+	imshow(leftWindowName, camImage);
+	imshow(rightWindowName, emitterImage);
 	waitKey();
 
 
@@ -1536,5 +1539,5 @@ int main(int argc, char* argv[])
 
 	cout << "done" << endl;
 	//mainViewer->spin();
-	getchar();
+	//getchar();
 }
