@@ -1190,8 +1190,8 @@ cv::Mat ToImage(PointCloudPtr cloud, Matrix3f intrinsic, Matrix4f toWorld, uint 
 	pcl::transformPointCloud(*cloud, *imgCloud, toWorld);
 
 	mainViewer->addCoordinateSystem(25);
-	ShowPointCloud(cloud);
-	ShowPointCloud(imgCloud);
+	//ShowPointCloud(cloud);
+	//ShowPointCloud(imgCloud);
 
 	for_each(imgCloud->points.begin(), imgCloud->points.end(), [intrinsic](PointT &point)
 	{
@@ -1318,6 +1318,17 @@ std::pair<int, int> MatchLines(vector<Line> camLines, vector<Line> emLines)
 }
 
 
+
+template <typename T>
+static float distancePointLine(const cv::Point_<T> point, const cv::Vec<T, 3>& line)
+{
+	//Line is given as a*x + b*y + c = 0
+	return std::fabsf(line(0)*point.x + line(1)*point.y + line(2))
+		/ std::sqrt(line(0)*line(0) + line(1)*line(1));
+}
+
+
+
 void findFundamentalMatrix(std::vector<cv::Point2d> imagePointsLeftCamera, std::vector<cv::Point2d> imagePointsRightCamera)
 {
 	///http://ros-developer.com/2019/01/01/computing-essential-and-fundamental-matrix-using-opencv-8-points-algorithm-with-c/
@@ -1417,247 +1428,16 @@ void findFundamentalMatrix(std::vector<cv::Point2d> imagePointsLeftCamera, std::
 }
 
 
-template <typename T>
-static float distancePointLine(const cv::Point_<T> point, const cv::Vec<T, 3>& line)
+void Rectify(MatrixXf cameraMatrix, AngleAxisf emiPose, Vector3f emiPosition)
 {
-	//Line is given as a*x + b*y + c = 0
-	return std::fabsf(line(0)*point.x + line(1)*point.y + line(2))
-		/ std::sqrt(line(0)*line(0) + line(1)*line(1));
-}
+	string folderName = "Images";
 
-
-
-void Test()
-{
-	InitialiseViewer();
-
-	Mat img = imread("/left.png");
-	Mat imgRight = imread("/right.png");
-	imshow(leftWindowName, img);
-	imshow(rightWindowName, imgRight);
-	waitKey();
-
-	float rotx = 0, roty = (20 / 180.0*M_PI), rotz = 0; // set these first
-	int f = 2; // this is also configurable, f=2 should be about 50mm focal length
-
-	int h = img.rows;
-	int w = img.cols;
-
-	float cx = cosf(rotx), sx = sinf(rotx);
-	float cy = cosf(roty), sy = sinf(roty);
-	float cz = cosf(rotz), sz = sinf(rotz);
-
-	float roto[3][2] = { // last column not needed, our vector has z=0
-		{ cz * cy, cz * sy * sx - sz * cx },
-	{ sz * cy, sz * sy * sx + cz * cx },
-	{ -sy, cy * sx }
-	};
-
-	float pt[4][2] = { { -w / 2, -h / 2 },{ w / 2, -h / 2 },{ w / 2, h / 2 },{ -w / 2, h / 2 } };
-	float ptt[4][2];
-	for (int i = 0; i < 4; i++) {
-		float pz = pt[i][0] * roto[2][0] + pt[i][1] * roto[2][1];
-		ptt[i][0] = w / 2 + (pt[i][0] * roto[0][0] + pt[i][1] * roto[0][1]) * f * h / (f * h + pz);
-		ptt[i][1] = h / 2 + (pt[i][0] * roto[1][0] + pt[i][1] * roto[1][1]) * f * h / (f * h + pz);
-	}
-
-	cv::Mat in_pt = (cv::Mat_<float>(4, 2) << 0, 0, w, 0, w, h, 0, h);
-	cv::Mat out_pt = (cv::Mat_<float>(4, 2) << ptt[0][0], ptt[0][1],
-		ptt[1][0], ptt[1][1], ptt[2][0], ptt[2][1], ptt[3][0], ptt[3][1]);
-
-	cv::Mat transform = cv::getPerspectiveTransform(in_pt, out_pt);
-
-	cv::Mat img_in = img.clone();
-	cv::warpPerspective(img_in, img, transform, img_in.size());
-
-	imshow(leftWindowName, img);
-	imshow(rightWindowName, imgRight);
-	waitKey();
-}
-
-
-void TestInteractive()
-{
-	InitialiseViewer();
-
-	//Mat img = imread("/left.png");
-	Mat imgRight = imread("right.png");
-	//imshow(leftWindowName, img);
-	imshow(centerWindowName, imgRight);
-	//waitKey();
-
-	Mat source = imread("left.png");
-	int alpha_ = 90., beta_ = 90., gamma_ = 90.;
-	int f_ = 50, dist_ = 50;
-
-	Mat destination;
-
-	string wndname1 = leftWindowName;
-	string wndname2 = "WarpPerspective: ";
-	string tbarname1 = "Alpha";
-	string tbarname2 = "Beta";
-	string tbarname3 = "Gamma";
-	string tbarname4 = "f";
-	string tbarname5 = "Distance";
-	namedWindow(wndname1, 1);
-	namedWindow(wndname2, 1);
-	createTrackbar(tbarname1, wndname2, &alpha_, 180);
-	createTrackbar(tbarname2, wndname2, &beta_, 180);
-	createTrackbar(tbarname3, wndname2, &gamma_, 180);
-	createTrackbar(tbarname4, wndname2, &f_, 2000);
-	createTrackbar(tbarname5, wndname2, &dist_, 2000);
-
-	imshow(wndname1, source);
-	while (true) {
-		double f, dist;
-		double alpha, beta, gamma;
-		alpha = ((double)alpha_ - 90.)*M_PI / 180;
-		beta = ((double)beta_ - 90.)*M_PI / 180;
-		gamma = ((double)gamma_ - 90.)*M_PI / 180;
-		f = (double)f_;
-		dist = (double)dist_;
-
-		Size taille = source.size();
-		double w = (double)taille.width, h = (double)taille.height;
-
-		// Projection 2D -> 3D matrix
-		Mat A1 = (Mat_<double>(4, 3) <<
-			1, 0, -w / 2,
-			0, 1, -h / 2,
-			0, 0, 0,
-			0, 0, 1);
-
-		// Rotation matrices around the X,Y,Z axis
-		Mat RX = (Mat_<double>(4, 4) <<
-			1, 0, 0, 0,
-			0, cos(alpha), -sin(alpha), 0,
-			0, sin(alpha), cos(alpha), 0,
-			0, 0, 0, 1);
-
-		Mat RY = (Mat_<double>(4, 4) <<
-			cos(beta), 0, -sin(beta), 0,
-			0, 1, 0, 0,
-			sin(beta), 0, cos(beta), 0,
-			0, 0, 0, 1);
-
-		Mat RZ = (Mat_<double>(4, 4) <<
-			cos(gamma), -sin(gamma), 0, 0,
-			sin(gamma), cos(gamma), 0, 0,
-			0, 0, 1, 0,
-			0, 0, 0, 1);
-
-		// Composed rotation matrix with (RX,RY,RZ)
-		Mat R = RX * RY * RZ;
-
-		// Translation matrix on the Z axis change dist will change the height
-		Mat T = (Mat_<double>(4, 4) <<
-			1, 0, 0, 0,
-			0, 1, 0, 0,
-			0, 0, 1, dist,
-			0, 0, 0, 1);
-
-		// Camera Intrisecs matrix 3D -> 2D
-		Mat A2 = (Mat_<double>(3, 4) <<
-			f, 0, w / 2, 0,
-			0, f, h / 2, 0,
-			0, 0, 1, 0);
-
-		// Final and overall transformation matrix
-		Mat transfo = A2 * (T * (R * A1));
-
-		// Apply matrix transformation
-		warpPerspective(source, destination, transfo, taille/*, INTER_CUBIC | WARP_INVERSE_MAP*/);
-
-		imshow(rightWindowName, destination);
-		waitKey(30);
-	}
-
-	//imshow(leftWindowName, img);
-	//imshow(rightWindowName, imgRight);
-	//waitKey();
-}
-
-
-
-void Correct(Mat img, float focalLength, float alpha, float beta, float gamma/* Matrix3f transform*/)
-{
-	alpha = (alpha)*M_PI / 180;
-	beta = (beta)*M_PI / 180;
-	gamma = (gamma)*M_PI / 180;
-
-	double w = (double)img.size().width, h = (double)img.size().height;
-
-	// Projection 2D -> 3D matrix
-	Mat A1 = (Mat_<double>(4, 3) <<
-		1, 0, -w / 2,
-		0, 1, -h / 2,
-		0, 0, 0,
-		0, 0, 1);
-
-
-	// Camera Intrisecs matrix 3D -> 2D
-	Mat A2 = (Mat_<double>(3, 4) <<
-		focalLength, 0, w / 2, 0,
-		0, focalLength, h / 2, 0,
-		0, 0, 1, 0);
-
-	// Rotation matrices around the X,Y,Z axis
-	Mat RX = (Mat_<double>(4, 4) <<
-		1, 0, 0, 0,
-		0, cos(alpha), -sin(alpha), 0,
-		0, sin(alpha), cos(alpha), 0,
-		0, 0, 0, 1);
-
-	Mat RY = (Mat_<double>(4, 4) <<
-		cos(beta), 0, -sin(beta), 0,
-		0, 1, 0, 0,
-		sin(beta), 0, cos(beta), 0,
-		0, 0, 0, 1);
-
-	Mat RZ = (Mat_<double>(4, 4) <<
-		cos(gamma), -sin(gamma), 0, 0,
-		sin(gamma), cos(gamma), 0, 0,
-		0, 0, 1, 0,
-		0, 0, 0, 1);
-
-	// Composed rotation matrix with (RX,RY,RZ)
-	Mat R = RX * RY * RZ;
-	//Mat R = (Mat_<double>(4, 4) <<
-	//	transform(0,0), transform(0,  1), transform(0, 2), 0,
-	//	transform(1, 0), transform(1, 1), transform(1, 2), 0,
-	//	transform(2, 0), transform(2, 1), transform(2, 2), 0,
-	//	0, 0, 0, 1);
-
-	// Translation matrix on the Z axis change dist will change the height
-	Mat T = (Mat_<double>(4, 4) <<
-		1, 0, 0, 0,
-		0, 1, 0, 0,
-		0, 0, 1, focalLength,
-		0, 0, 0, 1);
-
-
-	Mat trans = A2 * (T * (R * A1));
-
-	Mat img1;
-
-	// Apply matrix transformation
-	warpPerspective(img, img1, trans, img.size(), INTER_CUBIC | WARP_INVERSE_MAP);
-
-	imshow(leftWindowName, img);
-	imshow(rightWindowName, img1);
-	waitKey();
-}
-
-
-void Rectify(/*Mat imgLeft, Mat imgRight, Matrix3f transform*/)
-{
-	InitialiseViewer();
-
-	Mat imgLeft = imread("/left.png");
-	Mat imgRight = imread("/right.png");
+	Mat imgLeft = imread(folderName + "/left.png");
+	Mat imgRight = imread(folderName + "/right.png");
 	imshow(leftWindowName, imgLeft);
 	imshow(rightWindowName, imgRight);
 	waitKey();
+
 
 	vector<Line> leftLines, rightLines;
 	GetLinesIndices(imgLeft, leftLines);
@@ -1684,69 +1464,69 @@ void Rectify(/*Mat imgLeft, Mat imgRight, Matrix3f transform*/)
 
 	//cout << p.first << p.second << endl;
 
-	if (p.first != -1 && p.second != -1)
+
+	vector<cv::Point2f> ptsLeft, ptsRight;
+	Point2f cornerPtsLeft[4], cornerPtsRight[4];
+	///Get matching points and  corner points in images
 	{
-
-		vector<cv::Point2f> points1, points2;
-		Point2f corner11, corner12, corner21, corner22;
-		if (p.first > p.second)
+		if (p.first != -1 && p.second != -1)
 		{
-			for (size_t i = p.first, j = p.second; i < leftLines.size(); i++, j++)
+			Point2f corner11, corner12, corner21, corner22;
+			if (p.first > p.second)
 			{
-				if (j == leftLines.size() - 1)
+				for (size_t i = p.first, j = p.second; i < leftLines.size(); i++, j++)
 				{
-					corner12 = cv::Point2d(leftLines[i].indices[0].x(), leftLines[i].indices[0].y());
-					corner22 = cv::Point2d(rightLines[j].indices[0].x(), rightLines[j].indices[0].y());
-				}
-				for (size_t k = 0; k < leftLines[i].indices.size() && k < rightLines[j].indices.size(); k++)
-				{
-					points1.push_back(cv::Point2d(leftLines[i].indices[k].x(), leftLines[i].indices[k].y()));
-					points2.push_back(cv::Point2d(rightLines[j].indices[k].x(), rightLines[j].indices[k].y()));
-				}
-				if (i == p.first)
-				{
-					corner11 = points1[points1.size() - 1];
-					corner21 = points2[points2.size() - 1];
+					if (j == leftLines.size() - 1)
+					{
+						corner12 = cv::Point2d(leftLines[i].indices[0].x(), leftLines[i].indices[0].y());
+						corner22 = cv::Point2d(rightLines[j].indices[0].x(), rightLines[j].indices[0].y());
+					}
+					for (size_t k = 0; k < leftLines[i].indices.size() && k < rightLines[j].indices.size(); k++)
+					{
+						ptsLeft.push_back(cv::Point2d(leftLines[i].indices[k].x(), leftLines[i].indices[k].y()));
+						ptsRight.push_back(cv::Point2d(rightLines[j].indices[k].x(), rightLines[j].indices[k].y()));
+					}
+					if (i == p.first)
+					{
+						corner11 = ptsLeft[ptsLeft.size() - 1];
+						corner21 = ptsRight[ptsRight.size() - 1];
+					}
 				}
 			}
-		}
-		else
-		{
-			for (size_t i = p.first, j = p.second; j < rightLines.size(); i++, j++)
+			else
 			{
-				if (j == rightLines.size() - 1)
+				for (size_t i = p.first, j = p.second; j < rightLines.size(); i++, j++)
 				{
-					corner12 = cv::Point2d(leftLines[i].indices[0].x(), leftLines[i].indices[0].y());
-					corner22 = cv::Point2d(rightLines[j].indices[0].x(), rightLines[j].indices[0].y());
-				}
-				for (size_t k = 0; k < leftLines[i].indices.size() && k < rightLines[j].indices.size(); k++)
-				{
-					points1.push_back(cv::Point2d(leftLines[i].indices[k].x(), leftLines[i].indices[k].y()));
-					points2.push_back(cv::Point2d(rightLines[j].indices[k].x(), rightLines[j].indices[k].y()));
-				}
-				if (i == p.first)
-				{
-					corner11 = points1[points1.size() - 1];
-					corner21 = points2[points2.size() - 1];
+					if (j == rightLines.size() - 1)
+					{
+						corner12 = cv::Point2d(leftLines[i].indices[0].x(), leftLines[i].indices[0].y());
+						corner22 = cv::Point2d(rightLines[j].indices[0].x(), rightLines[j].indices[0].y());
+					}
+					for (size_t k = 0; k < leftLines[i].indices.size() && k < rightLines[j].indices.size(); k++)
+					{
+						ptsLeft.push_back(cv::Point2d(leftLines[i].indices[k].x(), leftLines[i].indices[k].y()));
+						ptsRight.push_back(cv::Point2d(rightLines[j].indices[k].x(), rightLines[j].indices[k].y()));
+					}
+					if (i == p.first)
+					{
+						corner11 = ptsLeft[ptsLeft.size() - 1];
+						corner21 = ptsRight[ptsRight.size() - 1];
+					}
 				}
 			}
-		}
 
-		{
-			Point2f ptsInPt2f[4];
-			Point2f ptsOutPt2f[4];
 
 			///get Rectangle by first and last points
 
-			ptsInPt2f[0] = Point2f(points1[0].x, points1[0].y);
-			ptsInPt2f[1] = Point2f(corner11.x, corner11.y);
-			ptsInPt2f[2] = Point2f(corner12.x, corner12.y);
-			ptsInPt2f[3] = Point2f(points1[points1.size() - 1].x, points1[points1.size() - 1].y);
+			cornerPtsLeft[0] = Point2f(ptsLeft[0].x, ptsLeft[0].y);
+			cornerPtsLeft[1] = Point2f(corner11.x, corner11.y);
+			cornerPtsLeft[2] = Point2f(corner12.x, corner12.y);
+			cornerPtsLeft[3] = Point2f(ptsLeft[ptsLeft.size() - 1].x, ptsLeft[ptsLeft.size() - 1].y);
 
-			ptsOutPt2f[0] = Point2f(points2[0].x, points2[0].y);
-			ptsOutPt2f[1] = Point2f(corner21.x, corner21.y);
-			ptsOutPt2f[2] = Point2f(corner22.x, corner22.y);
-			ptsOutPt2f[3] = Point2f(points2[points2.size() - 1].x, points2[points2.size() - 1].y);
+			cornerPtsRight[0] = Point2f(ptsRight[0].x, ptsRight[0].y);
+			cornerPtsRight[1] = Point2f(corner21.x, corner21.y);
+			cornerPtsRight[2] = Point2f(corner22.x, corner22.y);
+			cornerPtsRight[3] = Point2f(ptsRight[ptsRight.size() - 1].x, ptsRight[ptsRight.size() - 1].y);
 
 			//tempImage.at<Vec3b>(Point(ptsInPt2f[0].y, ptsInPt2f[0].x)) = Vec3b(255, 0, 255);
 			//tempImage.at<Vec3b>(Point(ptsInPt2f[1].y, ptsInPt2f[1].x)) = Vec3b(255, 0, 255);
@@ -1754,27 +1534,76 @@ void Rectify(/*Mat imgLeft, Mat imgRight, Matrix3f transform*/)
 			//tempImage.at<Vec3b>(Point(ptsInPt2f[3].y, ptsInPt2f[3].x)) = Vec3b(255, 0, 255);
 
 			Mat image1(imgLeft.rows, imgLeft.cols, imgLeft.type(), Scalar(0, 0, 0)), image2(imgRight.rows, imgRight.cols, imgRight.type(), Scalar(0, 0, 0));
+			image1 = imgLeft.clone();
+			image2 = imgRight.clone();
 
-			image1.at<Vec3b>(Point(ptsInPt2f[0].y, ptsInPt2f[0].x)) = Vec3b(255, 0, 255);
-			image1.at<Vec3b>(Point(ptsInPt2f[1].y, ptsInPt2f[1].x)) = Vec3b(255, 0, 255);
-			image1.at<Vec3b>(Point(ptsInPt2f[2].y, ptsInPt2f[2].x)) = Vec3b(255, 0, 255);
-			image1.at<Vec3b>(Point(ptsInPt2f[3].y, ptsInPt2f[3].x)) = Vec3b(255, 0, 255);
+			image1.at<Vec3b>(Point(cornerPtsLeft[0].y, cornerPtsLeft[0].x)) = Vec3b(255, 255, 255);
+			image1.at<Vec3b>(Point(cornerPtsLeft[1].y, cornerPtsLeft[1].x)) = Vec3b(255, 255, 255);
+			image1.at<Vec3b>(Point(cornerPtsLeft[2].y, cornerPtsLeft[2].x)) = Vec3b(255, 255, 255);
+			image1.at<Vec3b>(Point(cornerPtsLeft[3].y, cornerPtsLeft[3].x)) = Vec3b(255, 255, 255);
 
-			image2.at<Vec3b>(Point(ptsOutPt2f[0].y, ptsOutPt2f[0].x)) = Vec3b(255, 0, 255);
-			image2.at<Vec3b>(Point(ptsOutPt2f[1].y, ptsOutPt2f[1].x)) = Vec3b(255, 0, 255);
-			image2.at<Vec3b>(Point(ptsOutPt2f[2].y, ptsOutPt2f[2].x)) = Vec3b(255, 0, 255);
-			image2.at<Vec3b>(Point(ptsOutPt2f[3].y, ptsOutPt2f[3].x)) = Vec3b(255, 0, 255);
+			image2.at<Vec3b>(Point(cornerPtsRight[0].y, cornerPtsRight[0].x)) = Vec3b(255, 255, 255);
+			image2.at<Vec3b>(Point(cornerPtsRight[1].y, cornerPtsRight[1].x)) = Vec3b(255, 255, 255);
+			image2.at<Vec3b>(Point(cornerPtsRight[2].y, cornerPtsRight[2].x)) = Vec3b(255, 255, 255);
+			image2.at<Vec3b>(Point(cornerPtsRight[3].y, cornerPtsRight[3].x)) = Vec3b(255, 255, 255);
 
 			imshow(leftWindowName, image1);
 			imshow(rightWindowName, image2);
 			waitKey();
 		}
-
-
-		//perspectiveTransform(points1, points3, H1);
-		//perspectiveTransform(points2, points4, H2);
-
 	}
+
+	emiPosition[0] = -20;
+	Matrix3f essentialMatrix, fundamentalMatrix;
+	Matrix3f tx;
+	tx << 0, -emiPosition[2], emiPosition[1]
+		, emiPosition[2], 0, -emiPosition[0]
+		, -emiPosition[1], emiPosition[0], 0;
+
+	essentialMatrix = tx * emiPose.toRotationMatrix();
+
+	Matrix3f intrinsic = cameraMatrix.block(0, 0, 3, 3);
+
+	fundamentalMatrix = intrinsic.transpose().inverse() * essentialMatrix * intrinsic.inverse();
+	cout << fundamentalMatrix << endl;
+
+
+	Vector3f A = intrinsic * emiPose.toRotationMatrix() * emiPosition;
+	Matrix3f C;
+	C(0, 0) = 0; C(0, 1) = -A[2]; C(0, 2) = A[1];
+	C(1, 0) = A[2]; C(1, 1) = 0; C(1, 2) = -A[0];
+	C(2, 0) = -A[1]; C(2, 1) = A[0]; C(2, 2) = 0;
+	fundamentalMatrix = intrinsic.inverse().transpose() * emiPose.toRotationMatrix() * intrinsic.transpose() * C;
+	cout << fundamentalMatrix << endl;
+
+
+
+	for (size_t i = 0; i < ptsRight.size(); i+=5)
+	{
+		Vector3f line(0, 0, 0);
+		Vector3f pt(ptsRight[i].x, ptsRight[i].y, 1), pt2;
+
+
+		line = fundamentalMatrix * pt;
+
+		float x1 = 0, x2 = imgLeft.size().width;
+
+		float y1 = (-line[2] - line[0] * (x1)) / line[1];
+		float y2 = (-line[2] - line[0] * (x2)) / line[1];
+
+
+		cv::line(imgLeft, Point2i(x1, y1), Point2i(x2, y2), Scalar(0, 0, 255), 1);
+
+
+		imgRight.at<Vec3b>(ptsRight[i].x, ptsRight[i].y) = Vec3b(255, 255, 255);
+
+		imshow(leftWindowName, imgLeft);
+		imshow(rightWindowName, imgRight);
+		waitKey();
+		cout << "#" << endl;
+	}
+
+
 }
 
 
@@ -1896,16 +1725,11 @@ void CV_Test(MatrixXf cameraMatrix, Vector3f cubeDimension, Vector3f cubePositio
 
 	//cout << camera.toWorld*emitter.toCamera << endl;
 
-	cout << endl << "Images grabbed shown" << endl;
-	imshow(leftWindowName, camImage);
-	imshow(rightWindowName, emitterImage);
-	waitKey();
-
 
 
 	Mat imgLeft, imgRight;
 
-	if (1)///Check which one shall be left
+	if (0)///Check which one shall be left
 	{
 		imgLeft = camImage.clone();
 		imgRight = emitterImage.clone();
@@ -1917,6 +1741,11 @@ void CV_Test(MatrixXf cameraMatrix, Vector3f cubeDimension, Vector3f cubePositio
 	}
 
 
+	cout << endl << "Images grabbed shown" << endl;
+	imshow(leftWindowName, imgLeft);
+	imshow(rightWindowName, imgRight);
+	waitKey();
+
 	imwrite(folderName + "/left.png", imgLeft);
 	imwrite(folderName + "/right.png", imgRight);
 
@@ -1927,171 +1756,10 @@ void CV_Test(MatrixXf cameraMatrix, Vector3f cubeDimension, Vector3f cubePositio
 	//imshow(rightWindowName, imgRight);
 	//waitKey();
 
-	//TestInteractive();
-	//Correct(imgLeft, focalLength, 0,-10,0);
-	//return;
-
-	vector<Line> leftLines, rightLines;
-	GetLinesIndices(imgLeft, leftLines);
-	GetLinesIndices(imgRight, rightLines);
-
-
-	///Test line indices
-	{
-		//Mat tempImage(imgLeft.rows, imgLeft.cols, imgLeft.type(), Scalar(0, 0, 0));
-		//for (size_t i = 0; i < leftLines.size(); i++)
-		//{
-		//	for (size_t j = 0; j < leftLines[i].indices.size(); j++)
-		//	{
-		//		tempImage.at<Vec3b>(Point(leftLines[i].indices[j].y(), leftLines[i].indices[j].x())) = Vec3b(255, 255, 255);
-		//	}
-		//}
-		//imshow(rightWindowName, tempImage);
-		//waitKey();
-	}
-
-
-
-	pair<int, int> p = MatchLines(rightLines, leftLines);
-
-	//cout << p.first << p.second << endl;
-
-	if (p.first != -1 && p.second != -1)
-	{
-		vector<cv::Point2f> points1, points2;
-		Point2f corner11, corner12, corner21, corner22;
-		if (p.first > p.second)
-		{
-			for (size_t i = p.first, j = p.second; i < leftLines.size(); i++, j++)
-			{
-				if (j == leftLines.size() - 1)
-				{
-					corner12 = cv::Point2d(leftLines[i].indices[0].x(), leftLines[i].indices[0].y());
-					corner22 = cv::Point2d(rightLines[j].indices[0].x(), rightLines[j].indices[0].y());
-				}
-				for (size_t k = 0; k < leftLines[i].indices.size() && k < rightLines[j].indices.size(); k++)
-				{
-					points1.push_back(cv::Point2d(leftLines[i].indices[k].x(), leftLines[i].indices[k].y()));
-					points2.push_back(cv::Point2d(rightLines[j].indices[k].x(), rightLines[j].indices[k].y()));
-				}
-				if (i == p.first)
-				{
-					corner11 = points1[points1.size() - 1];
-					corner21 = points2[points2.size() - 1];
-				}
-			}
-		}
-		else
-		{
-			for (size_t i = p.first, j = p.second; j < rightLines.size(); i++, j++)
-			{
-				if (j == rightLines.size() - 1)
-				{
-					corner12 = cv::Point2d(leftLines[i].indices[0].x(), leftLines[i].indices[0].y());
-					corner22 = cv::Point2d(rightLines[j].indices[0].x(), rightLines[j].indices[0].y());
-				}
-				for (size_t k = 0; k < leftLines[i].indices.size() && k < rightLines[j].indices.size(); k++)
-				{
-					points1.push_back(cv::Point2d(leftLines[i].indices[k].x(), leftLines[i].indices[k].y()));
-					points2.push_back(cv::Point2d(rightLines[j].indices[k].x(), rightLines[j].indices[k].y()));
-				}
-				if (i == p.first)
-				{
-					corner11 = points1[points1.size() - 1];
-					corner21 = points2[points2.size() - 1];
-				}
-			}
-		}
-
-		{
-			Point2f ptsInPt2f[4];
-			Point2f ptsOutPt2f[4];
-
-			///get Rectangle by first and last points
-
-			ptsInPt2f[0] = Point2f(points1[0].x, points1[0].y);
-			ptsInPt2f[1] = Point2f(corner11.x, corner11.y);
-			ptsInPt2f[2] = Point2f(corner12.x, corner12.y);
-			ptsInPt2f[3] = Point2f(points1[points1.size() - 1].x, points1[points1.size() - 1].y);
-
-			ptsOutPt2f[0] = Point2f(points2[0].x, points2[0].y);
-			ptsOutPt2f[1] = Point2f(corner21.x, corner21.y);
-			ptsOutPt2f[2] = Point2f(corner22.x, corner22.y);
-			ptsOutPt2f[3] = Point2f(points2[points2.size() - 1].x, points2[points2.size() - 1].y);
-
-			//tempImage.at<Vec3b>(Point(ptsInPt2f[0].y, ptsInPt2f[0].x)) = Vec3b(255, 0, 255);
-			//tempImage.at<Vec3b>(Point(ptsInPt2f[1].y, ptsInPt2f[1].x)) = Vec3b(255, 0, 255);
-			//tempImage.at<Vec3b>(Point(ptsInPt2f[2].y, ptsInPt2f[2].x)) = Vec3b(255, 0, 255);
-			//tempImage.at<Vec3b>(Point(ptsInPt2f[3].y, ptsInPt2f[3].x)) = Vec3b(255, 0, 255);
-
-			Mat image1(imgLeft.rows, imgLeft.cols, imgLeft.type(), Scalar(0, 0, 0)), image2(imgRight.rows, imgRight.cols, imgRight.type(), Scalar(0, 0, 0));
-			image1 = imgLeft.clone();
-			image2 = imgRight.clone();
-
-			image1.at<Vec3b>(Point(ptsInPt2f[0].y, ptsInPt2f[0].x)) = Vec3b(255, 255, 255);
-			image1.at<Vec3b>(Point(ptsInPt2f[1].y, ptsInPt2f[1].x)) = Vec3b(255, 255, 255);
-			image1.at<Vec3b>(Point(ptsInPt2f[2].y, ptsInPt2f[2].x)) = Vec3b(255, 255, 255);
-			image1.at<Vec3b>(Point(ptsInPt2f[3].y, ptsInPt2f[3].x)) = Vec3b(255, 255, 255);
-
-			image2.at<Vec3b>(Point(ptsOutPt2f[0].y, ptsOutPt2f[0].x)) = Vec3b(255, 255, 255);
-			image2.at<Vec3b>(Point(ptsOutPt2f[1].y, ptsOutPt2f[1].x)) = Vec3b(255, 255, 255);
-			image2.at<Vec3b>(Point(ptsOutPt2f[2].y, ptsOutPt2f[2].x)) = Vec3b(255, 255, 255);
-			image2.at<Vec3b>(Point(ptsOutPt2f[3].y, ptsOutPt2f[3].x)) = Vec3b(255, 255, 255);
-
-			imshow(leftWindowName, image1);
-			imshow(rightWindowName, image2);
-			waitKey();
-		}
-
-		////findFundamentalMatrix(points1, points2);
-
-		//Mat fundamentalMatrix = findFundamentalMat(points1, points2, CV_FM_LMEDS);
-
-
-		//Mat H1, H2;
-		//cout << stereoRectifyUncalibrated(points1, points2, fundamentalMatrix, imgLeft.size(), H1, H2, 3) << endl;
-
-		////cout << H1 << endl;
-
-		//Mat camImage1, emitterImage1;
-		//warpPerspective(imgLeft, camImage1, H1, imgLeft.size());
-		//warpPerspective(imgRight, emitterImage1, H2, imgRight.size());
-
-
-		//imshow(leftWindowName, camImage1);
-		//imshow(rightWindowName, emitterImage1);
-		//waitKey();
-
-		////vector<cv::Point2f> points3, points4;
-		////perspectiveTransform(points1, points3, H1);
-		////perspectiveTransform(points2, points4, H2);
-		////fundamentalMatrix = findFundamentalMat(points1, points2, CV_FM_LMEDS);
-		////drawEpipolarLines<float>("Epipolar lines", fundamentalMatrix, camImage1, emitterImage1, points3, points4);
 
 
 
 
-		/////// /////////////////////////////////////////////////
-
-
-		//vector<double> disparity(points1.size()), depth(points1.size());
-		//for (size_t i = 0; i < points1.size(); i++)
-		//{
-		//	disparity[i] = points2[i].x - points1[i].x;
-		//}
-
-
-
-		//for (size_t i = 0; i < disparity.size(); i++)
-		//{
-
-		//}
-
-
-	}
-
-
-	//cout << fundamentalMatrix << endl;
 	cout << "done" << endl;
 	//waitKey();
 }
@@ -2123,10 +1791,10 @@ int main(int argc, char* argv[])
 	cameraMatrix(1, 1) = focalLength;
 	cameraMatrix(0, 2) = 80;
 	cameraMatrix(1, 2) = 60;
-	
-	camResh = 2 * cameraMatrix(0, 2); camResv = 2 * cameraMatrix(1, 2); 
+
+	camResh = 2 * cameraMatrix(0, 2); camResv = 2 * cameraMatrix(1, 2);
 	///https://stackoverflow.com/questions/39992968/how-to-calculate-field-of-view-of-the-camera-from-camera-intrinsic-matrix
-	camFOVh = (2 * atan(camResh / (2 * cameraMatrix(0, 0))))*180/M_PI; camFOVv = (2 * atan(camResv / (2 * cameraMatrix(1, 1)))) * 180 / M_PI;
+	camFOVh = (2 * atan(camResh / (2 * cameraMatrix(0, 0)))) * 180 / M_PI; camFOVv = (2 * atan(camResv / (2 * cameraMatrix(1, 1)))) * 180 / M_PI;
 	emitterFOVh = 32; emitterFOVv = 24;  emiResh = 96; emiResv = 200;
 
 	int cubeLength = 20;
@@ -2143,10 +1811,11 @@ int main(int argc, char* argv[])
 	//cameraPoses.push_back(AngleAxisf(0, Vector3f(0, 0, 0)));
 
 
-	CV_Test(cameraMatrix, cubeDimension, cubePosition, cubePose
-		, emitterFOVv, emitterFOVh, emiResv, emiResh, emiPose, emiPosition, camFOVv, camFOVh, camResv, camResh, cameraPositions, cameraPoses, folderName);
+	//CV_Test(cameraMatrix, cubeDimension, cubePosition, cubePose
+	//	, emitterFOVv, emitterFOVh, emiResv, emiResh, emiPose, emiPosition, camFOVv, camFOVh, camResv, camResh, cameraPositions, cameraPoses, folderName);
 
 
+	Rectify(cameraMatrix, emiPose, emiPosition);
 
 	cv::destroyAllWindows();
 	cout << "done" << endl;
